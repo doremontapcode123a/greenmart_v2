@@ -1,0 +1,158 @@
+# MySQL 8 dạng StatefulSet 1 replica – phù hợp dev/staging.
+# Production nên dùng dịch vụ managed (RDS/Cloud SQL...): bỏ file này, đặt DB_HOST trong configmap.yaml,
+# và tự tạo 5 database + 5 tài khoản như script bên dưới.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/part-of: greenmart
+data:
+  01-create-databases.sh: |
+    #!/bin/sh
+    # Chạy một lần khi volume MySQL còn trống: mỗi service một database + tài khoản riêng.
+    set -e
+    mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
+    CREATE DATABASE user_db      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE catalog_db   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE order_db     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE promotion_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE web_db       CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+    CREATE USER 'user_svc'@'%'      IDENTIFIED WITH mysql_native_password BY '${USER_DB_PASSWORD}';
+    CREATE USER 'catalog_svc'@'%'   IDENTIFIED WITH mysql_native_password BY '${CATALOG_DB_PASSWORD}';
+    CREATE USER 'order_svc'@'%'     IDENTIFIED WITH mysql_native_password BY '${ORDER_DB_PASSWORD}';
+    CREATE USER 'promotion_svc'@'%' IDENTIFIED WITH mysql_native_password BY '${PROMOTION_DB_PASSWORD}';
+    CREATE USER 'web_svc'@'%'       IDENTIFIED WITH mysql_native_password BY '${WEB_DB_PASSWORD}';
+
+    GRANT ALL PRIVILEGES ON user_db.*      TO 'user_svc'@'%';
+    GRANT ALL PRIVILEGES ON catalog_db.*   TO 'catalog_svc'@'%';
+    GRANT ALL PRIVILEGES ON order_db.*     TO 'order_svc'@'%';
+    GRANT ALL PRIVILEGES ON promotion_db.* TO 'promotion_svc'@'%';
+    GRANT ALL PRIVILEGES ON web_db.*       TO 'web_svc'@'%';
+    FLUSH PRIVILEGES;
+    SQL
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/part-of: greenmart
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql
+        app.kubernetes.io/part-of: greenmart
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - --character-set-server=utf8mb4
+        - --collation-server=utf8mb4_unicode_ci
+        ports:
+        - name: mysql
+          containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: MYSQL_ROOT_PASSWORD
+        - name: USER_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: USER_DB_PASSWORD
+        - name: CATALOG_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: CATALOG_DB_PASSWORD
+        - name: ORDER_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: ORDER_DB_PASSWORD
+        - name: PROMOTION_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: PROMOTION_DB_PASSWORD
+        - name: WEB_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: WEB_DB_PASSWORD
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          failureThreshold: 6
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+          subPath: mysql
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+          readOnly: true
+      volumes:
+      - name: init
+        configMap:
+          name: mysql-init
+          defaultMode: 365
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/part-of: greenmart
+spec:
+  selector:
+    app.kubernetes.io/name: mysql
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql

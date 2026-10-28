@@ -1,0 +1,68 @@
+name: Build and Push Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to build'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag to build'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REGISTRY: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com
+  ECR_REPOSITORY_APP: greenmart-app
+  ECR_REPOSITORY_NGINX: greenmart-nginx
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: refs/tags/${{ inputs.version }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        mask-aws-account-id: false
+        
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+      
+    - name: Build Docker image app
+      run: |
+        docker build -t greenmart-app:${{ inputs.version }} .
+        
+    - name: Tag and push image to ECR app
+      run: |
+        docker tag greenmart-app:${{ inputs.version }} ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_APP }}:${{ inputs.version }}
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_APP }}:${{ inputs.version }}
+        
+    - name: Build Docker image nginx
+      run: |
+        docker build -t greenmart-nginx:${{ inputs.version }} .
+        
+    - name: Tag and push image to ECR nginx
+      run: |
+        docker tag greenmart-nginx:${{ inputs.version }} ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_NGINX }}:${{ inputs.version }}
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_NGINX }}:${{ inputs.version }}
+
+
+    - name: Output image URI
+      run: |
+        echo "IMAGE_URI_APP=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_APP }}:${{ inputs.version }}" >> $GITHUB_OUTPUT
+        echo "IMAGE_URI_NGINX=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_NGINX }}:${{ inputs.version }}" >> $GITHUB_OUTPUT
+      id: build-output

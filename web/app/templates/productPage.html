@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Green Mart - Sản phẩm</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+  <!-- HEADER -->
+  <nav class="bg-green-700 text-white px-6 py-4 flex justify-between items-center left-0 w-full shadow z-50">
+  <!-- Logo -->
+  <a href="{% url 'home' %}" class="text-2xl font-bold">
+    GREEN <span class="text-yellow-300">MART</span>
+  </a>
+
+  <!-- Menu -->
+  
+
+  <!-- Thanh tìm kiếm -->
+  <form action="{% url 'search' %}" method="get" class="hidden md:flex items-center mx-6 w-1/3">
+    
+    <input 
+      type="text" 
+      name="q" 
+      placeholder="Tìm kiếm sản phẩm bạn muốn..."
+      class="w-full px-4 py-2 rounded-l border border-gray-300 text-black focus:outline-none"
+    >
+    <button type="submit" class="bg-yellow-400 text-black px-4 py-2 rounded-r hover:bg-yellow-300">
+      🔍
+    </button>
+  </form>
+
+  <!-- Đăng nhập + Giỏ hàng -->
+  <div class="flex items-center gap-3">
+  {% if request.user.is_authenticated %}
+    <div class="bg-green-700 text-white px-4 py-2 rounded">
+      👋 Xin chào, {{ request.user.username }}
+    </div>
+    <a href="{% url 'logout' %}" 
+       class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-400">
+      Đăng xuất
+    </a>
+  {% else %}
+    <a href="{% url 'loginn' %}" 
+       class="bg-yellow-400 text-black px-4 py-2 rounded hover:bg-yellow-300">
+      Đăng nhập
+    </a>
+  {% endif %}
+
+  <div class="relative">
+    <a href="{% url 'cart' %}" 
+       class="bg-white text-green-700 px-4 py-2 rounded hover:bg-gray-100 relative">
+      🛒 Giỏ hàng
+      {% if items > 0 %}
+        <span class="absolute -top-1 -right-1 bg-red-600 text-white 
+                     text-[10px] font-bold w-5 h-5 flex items-center 
+                     justify-center rounded-full">
+          {{ items }}
+        </span>
+      {% endif %}
+    </a>
+  </div>
+</div>
+
+</nav>
+
+  <!-- DANH MỤC -->
+  <section class="max-w-6xl mx-auto mt-10 px-4">
+    <h2 class="text-3xl font-bold text-green-700 text-center mb-6">Danh mục sản phẩm</h2>
+    
+
+
+  <div class="max-w-7xl mx-auto py-10 px-4">
+
+  <!-- DANH MỤC -->
+  <div class="flex flex-wrap justify-center gap-3 mb-10">
+    <button class="category-btn bg-green-600 text-white px-5 py-2.5 rounded-full font-medium shadow-md hover:bg-green-700 transition" data-category="all">
+      🌿 Tất cả
+    </button>
+    {% for cat in categories %}
+    <button class="category-btn bg-gray-100 text-gray-700 hover:bg-green-100 hover:text-green-700 px-5 py-2.5 rounded-full font-medium border border-gray-200 transition" data-category="{{ cat.slug }}">
+      {{ cat.name }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- DANH SÁCH SẢN PHẨM -->
+  <div id="product-list" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+    {% for product in products %}
+    
+    <div class="product-card group bg-white rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden border border-gray-100" data-category="{{ product.category.slug }}">
+      <a href="{% url 'detail' product.slug%}">
+
+      
+      <!-- Ảnh sản phẩm -->
+      <div class="relative">
+        <img src="{{ product.image.url }}" class="w-full h-48 object-cover transition-transform duration-500 group-hover:scale-105">
+        <span class="absolute top-2 right-2 bg-green-600 text-white text-xs px-2 py-1 rounded-full shadow">
+          {{ product.category.name }}
+        </span>
+      </div>
+
+      <!-- Thông tin sản phẩm -->
+      <div class="p-4">
+        <h2 class="text-gray-800 font-semibold text-base group-hover:text-green-700 transition">{{ product.name }}</h2>
+        <p class="text-green-600 font-bold mt-1">{{ product.price }}₫</p></a>
+        <form method="post" action="{% url 'add_to_cart' product.slug %}">
+          {% csrf_token %}
+          <button class="mt-3 w-full bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 rounded-md transition">
+            Thêm vào giỏ
+          </button>
+
+        </form>
+
+        
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+
+
+  <script>
+    const categoryButtons = document.querySelectorAll(".category-btn");
+    const products = document.querySelectorAll(".product-card");
+
+    categoryButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        categoryButtons.forEach(b => b.classList.remove("bg-green-600", "text-white"));
+        btn.classList.add("bg-green-600", "text-white");
+
+        const category = btn.dataset.category;
+        products.forEach(p => {
+          if (category === "all" || p.dataset.category === category) {
+            p.classList.remove("hidden");
+          } else {
+            p.classList.add("hidden");
+          }
+        });
+      });
+    });
+    const params = new URLSearchParams(window.location.search);
+    const initialCategory = params.get("category");
+
+    if (initialCategory) {
+    
+      const activeBtn = document.querySelector(`.category-btn[data-category="${initialCategory}"]`);
+      if (activeBtn) activeBtn.click();
+    }
+  </script>
+  {% if messages %}
+  <div id="toast-container" class="fixed top-20 right-5 z-50 space-y-2">
+    {% for message in messages %}
+      <div class="toast bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium 
+                  transition-opacity duration-1000 ease-in-out opacity-100">
+        {{ message }}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<footer class="bg-green-700 text-white text-center p-4" >
+    © 2025 Green Grocer. All rights reserved.
+  </footer>
+</body>
+
+</html>

@@ -1,0 +1,38 @@
+{
+  "family": "greenmart-task",
+  "networkMode": "awsvpc",
+  "executionRoleArn": "arn:aws:iam::410098332444:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "web",
+      "image": "{{WEB_IMAGE}}",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ]
+    },
+    {
+      "name": "nginx",
+      "image": "{{NGINX_IMAGE}}",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "web",
+          "condition": "START"
+        }
+      ]
+    }
+  ],
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024"
+}

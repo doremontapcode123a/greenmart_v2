@@ -1,0 +1,47 @@
+# Bước 2: chạy SAU khi các Job migrate-* đã Complete. Mặc định chỉ --dry-run (thống kê, không ghi gì).
+# Image build từ scripts/Dockerfile: docker build -f scripts/Dockerfile -t <registry>/greenmart-data-migrator:1.0 .
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-migrator
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        greenmart/db-client: 'true'
+        app.kubernetes.io/part-of: greenmart
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      containers:
+      - name: migrator
+        image: noobcoder1219/data-migrator:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - /scripts/migrate_sqlite_to_mysql.py
+        - --sqlite
+        - /legacy/db.sqlite3
+        - --host
+        - mysql
+        - --user
+        - root
+        - --password
+        - $(MYSQL_ROOT_PASSWORD)
+        - --truncate
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: MYSQL_ROOT_PASSWORD
+        volumeMounts:
+        - name: legacy
+          mountPath: /legacy
+          readOnly: true
+      volumes:
+      - name: legacy
+        persistentVolumeClaim:
+          claimName: greenmart-legacy-data

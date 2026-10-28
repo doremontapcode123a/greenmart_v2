@@ -1,0 +1,29 @@
+# ĐỔI host 'greenmart.example.com'. Secret TLS 'greenmart-tls' tạo bằng cert-manager hoặc:
+#   kubectl -n greenmart create secret tls greenmart-tls --cert=tls.crt --key=tls.key
+# Không dùng TLS thì xóa mục `tls` và đặt PUBLIC_SCHEME=http, CSRF_TRUSTED_ORIGINS=http://... trong configmap.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: greenmart
+  labels:
+    app.kubernetes.io/name: ingress
+    app.kubernetes.io/part-of: greenmart
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - greenmart.example.com
+    secretName: greenmart-tls
+  rules:
+  - host: greenmart.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gateway
+            port:
+              number: 80

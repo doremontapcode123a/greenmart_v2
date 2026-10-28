@@ -1,0 +1,143 @@
+# Yêu cầu CNI hỗ trợ NetworkPolicy (Calico, Cilium...). Namespace của Ingress Controller giả định là 'ingress-nginx' – đổi nếu khác.
+# Bỏ file này khỏi kustomization.yaml nếu chưa cần.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-gateway
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-backends
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app.kubernetes.io/name
+      operator: In
+      values:
+      - web
+      - user-service
+      - catalog-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: gateway
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-to-services
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app.kubernetes.io/name
+      operator: In
+      values:
+      - user-service
+      - catalog-service
+      - order-service
+      - promotion-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: web
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-order-to-dependencies
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app.kubernetes.io/name
+      operator: In
+      values:
+      - catalog-service
+      - promotion-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: order-service
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-clients-to-mysql
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          greenmart/db-client: 'true'
+    ports:
+    - protocol: TCP
+      port: 3306

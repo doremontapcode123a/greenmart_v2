@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản lý sản phẩm - GreenMart</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Thanh điều hướng -->
+  <nav class="bg-green-600 text-white px-6 py-4 flex justify-between items-center shadow">
+    <h1 class="text-2xl font-bold">GreenMart Admin</h1>
+    <div class="flex items-center gap-4">
+      <a href="/admin_panel/" class="hover:underline">🏠 Dashboard</a>
+      <a href="#" class="bg-white text-green-600 px-3 py-1 rounded font-medium">Đăng xuất</a>
+    </div>
+  </nav>
+
+  <!-- Nội dung chính -->
+  <main class="max-w-7xl mx-auto py-10 px-4">
+
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-3xl font-bold text-gray-800">🛒 Quản lý sản phẩm</h2>
+      <a href="{% url 'add_product' %}" class="bg-green-600 text-white px-4 py-2 rounded shadow hover:bg-green-700">+ Thêm sản phẩm</a>
+    </div>
+
+    <!-- Ô tìm kiếm -->
+    <div class="mb-6">
+      <input
+        type="text"
+        id="searchInput"
+        placeholder="Tìm sản phẩm..."
+        class="w-full md:w-1/3 px-4 py-2 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+      >
+    </div>
+
+    <!-- Bảng sản phẩm -->
+    <div class="bg-white rounded-lg shadow overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead class="bg-green-600 text-white">
+          <tr>
+            <th class="p-3">#</th>
+            <th class="p-3">Ảnh</th>
+            <th class="p-3">Tên sản phẩm</th>
+            <th class="p-3">Danh mục</th>
+            <th class="p-3">Giá</th>
+            <th class="p-3">Tồn kho</th>
+            <th class="p-3">Trạng thái</th>
+            <th class="p-3 text-center">Hành động</th>
+          </tr>
+        </thead>
+        <tbody id="productTable">
+          {% for p in products %}
+          <tr class="border-b hover:bg-gray-50 transition">
+            <td class="p-3">{{ forloop.counter }}</td>
+            <td class="p-3">
+              {% if p.image %}
+              <img src="{{ p.image.url }}" class="w-16 h-16 object-cover rounded">
+              {% else %}
+              <div class="w-16 h-16 bg-gray-200 rounded"></div>
+              {% endif %}
+            </td>
+            <td class="p-3 font-semibold text-gray-800">{{ p.name }}</td>
+            <td class="p-3 text-gray-600">{{ p.category.name }}</td>
+            <td class="p-3 text-green-600 font-bold">{{ p.price }}₫</td>
+            <td class="p-3">{{ p.stock }}</td>
+            <td class="p-3">
+              {% if p.status == "available" %}
+                <span class="px-2 py-1 bg-green-100 text-green-700 rounded text-sm">Còn hàng</span>
+              {% elif p.status == "out_of_stock" %}
+                <span class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm">Hết hàng</span>
+              {% else %}
+                <span class="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm">Ẩn</span>
+              {% endif %}
+            </td>
+            <td class="p-3 text-center">
+              <a href="{% url 'edit_product' p.slug %}" class="text-blue-600 hover:underline">Sửa</a> |
+              <a href="{% url 'delete_product' p.slug %}" class="text-red-600 hover:underline" onclick="return confirm('Bạn có muốn xóa không?')">Xóa</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="8" class="text-center text-gray-500 py-6">Không có sản phẩm nào</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Tìm kiếm đơn giản bằng JS -->
+  <script>
+    const searchInput = document.getElementById("searchInput");
+    const tableRows = document.querySelectorAll("#productTable tr");
+
+    searchInput.addEventListener("keyup", () => {
+      const keyword = searchInput.value.toLowerCase();
+      tableRows.forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(keyword) ? "" : "none";
+      });
+    });
+  </script>
+
+</body>
+</html>

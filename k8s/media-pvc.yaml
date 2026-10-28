@@ -1,0 +1,15 @@
+# Ảnh sản phẩm: catalog-service ghi, gateway đọc => cần storage ReadWriteMany (NFS, EFS, Filestore, CephFS, Azure Files...).
+# Thêm `storageClassName: <class hỗ trợ RWX>` vào spec nếu StorageClass mặc định của cluster không hỗ trợ RWX.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: greenmart-media
+  labels:
+    app.kubernetes.io/name: media
+    app.kubernetes.io/part-of: greenmart
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi

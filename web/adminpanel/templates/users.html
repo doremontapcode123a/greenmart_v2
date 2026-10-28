@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản lý người dùng - GreenMart</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Thanh điều hướng -->
+  <nav class="bg-green-600 text-white px-6 py-4 flex justify-between items-center shadow">
+    <h1 class="text-2xl font-bold">GreenMart Admin</h1>
+    <div class="flex items-center gap-4">
+      <a href="/admin_panel/" class="hover:underline">🏠 Dashboard</a>
+      <a href="/admin_panel/products/" class="hover:underline">🛒 Sản phẩm</a>
+      <a href="/admin_panel/orders/" class="hover:underline">📦 Đơn hàng</a>
+      <a href="/admin_panel/users/" class="bg-white text-green-600 px-3 py-1 rounded font-medium">👥 Người dùng</a>
+    </div>
+  </nav>
+
+  <!-- Nội dung chính -->
+  <main class="max-w-7xl mx-auto py-10 px-4">
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-3xl font-bold text-gray-800">👥 Quản lý người dùng</h2>
+      <input
+        type="text"
+        id="searchUser"
+        placeholder="Tìm kiếm người dùng..."
+        class="px-4 py-2 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-64"
+      >
+    </div>
+
+    <div class="bg-white rounded-lg shadow overflow-x-auto">
+      <table class="w-full border-collapse text-left">
+        <thead class="bg-green-600 text-white">
+          <tr>
+            <th class="p-3">#</th>
+            <th class="p-3">Tên đăng nhập</th>
+            <th class="p-3">Email</th>
+            <th class="p-3">Ngày tham gia</th>
+            <th class="p-3">Trạng thái</th>
+            <th class="p-3 text-center">Hành động</th>
+          </tr>
+        </thead>
+        <tbody id="userTable">
+          {% for user in users %}
+          <tr class="border-b hover:bg-gray-50 transition">
+            <td class="p-3">{{ forloop.counter }}</td>
+            <td class="p-3 font-semibold">{{ user.username }}</td>
+            <td class="p-3">{{ user.email }}</td>
+            <td class="p-3 text-gray-600">{{ user.date_joined|date:"d/m/Y H:i" }}</td>
+            <td class="p-3">
+              {% if user.is_active %}
+                <span class="px-2 py-1 bg-green-100 text-green-700 rounded text-sm">Hoạt động</span>
+              {% else %}
+                <span class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm">Bị khóa</span>
+              {% endif %}
+            </td>
+            <td class="p-3 text-center space-x-2">
+              {% if user.is_active %}
+              <form action="{% url 'admin_user_toggle' user.id %}" method="post" class="inline">
+                {% csrf_token %}
+                <button 
+                  class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
+                  onclick="return confirm('Khóa tài khoản này?')"
+                >
+                  🔒 Khóa
+                </button>
+              </form>
+              {% else %}
+              <form action="{% url 'admin_user_toggle' user.id %}" method="post" class="inline">
+                {% csrf_token %}
+                <button 
+                  class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+                  onclick="return confirm('Mở khóa tài khoản này?')"
+                >
+                  🔓 Mở
+                </button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-center text-gray-500 py-6">Không có người dùng nào</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    // Tìm kiếm theo tên hoặc email
+    const searchInput = document.getElementById("searchUser");
+    const rows = document.querySelectorAll("#userTable tr");
+
+    searchInput.addEventListener("keyup", () => {
+      const keyword = searchInput.value.toLowerCase();
+      rows.forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(keyword) ? "" : "none";
+      });
+    });
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản lý sản phẩm - GreenMart</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Thanh điều hướng -->
+  <nav class="bg-green-600 text-white px-6 py-4 flex justify-between items-center shadow">
+    <h1 class="text-2xl font-bold">GreenMart Admin</h1>
+    <div class="flex items-center gap-4">
+      <a href="/admin_panel/" class="hover:underline">🏠 Dashboard</a>
+      <a href="#" class="bg-white text-green-600 px-3 py-1 rounded font-medium">Đăng xuất</a>
+    </div>
+  </nav>
+
+<div class="p-6">
+  <h2 class="text-2xl font-bold mb-4">🎁 Quản lý khuyến mãi</h2>
+  <a href="{% url 'add_promotion' %}" class="bg-green-600 text-white px-4 py-2 rounded">+ Thêm khuyến mãi</a>
+
+  <table class="w-full mt-4 border-collapse">
+    <thead>
+      <tr class="bg-gray-200 text-left">
+        <th class="p-2">Tên</th>
+        <th>Mã</th>
+        <th>Loại</th>
+        <th>Giá trị</th>
+        <th>Áp dụng</th>
+        <th>Ngày bắt đầu</th>
+        <th>Ngày kết thúc</th>
+        <th>Trạng thái</th>
+        <th>Hành động</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for promo in promotions %}
+      <tr class="border-t">
+        <td class="p-2">{{ promo.name }}</td>
+        <td>{{ promo.code }}</td>
+        <td>{{ promo.get_discount_type_display }}</td>
+        <td>{{ promo.discount_value }}</td>
+        <td>{{ promo.get_apply_type_display }}</td>
+        <td>{{ promo.start_date|date:"d/m/Y" }}</td>
+        <td>{{ promo.end_date|date:"d/m/Y" }}</td>
+        <td>{% if promo.is_active %}🟢 Hoạt động{% else %}🔴 Tắt{% endif %}</td>
+        <td>
+          <a href="{% url 'edit_promotion' promo.id %}" class="text-blue-500">Sửa</a> |
+          <a href="{% url 'delete_promotion' promo.id %}" class="text-red-500"
+             onclick="return confirm('Xóa khuyến mãi này?')">Xóa</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

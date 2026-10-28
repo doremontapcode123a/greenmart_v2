@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Đăng nhập quản trị</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+
+  <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm">
+    <h2 class="text-2xl font-bold text-center text-green-600 mb-6">Đăng nhập quản trị</h2>
+
+    {% if messages %}
+      {% for msg in messages %}
+        <div class="mb-3 text-center text-sm text-red-500">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+
+    <form method="POST" class="space-y-4">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm font-medium text-gray-600">Tên đăng nhập</label>
+        <input type="text" name="username" class="mt-1 w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-400 focus:outline-none" placeholder="Nhập tên đăng nhập" required>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-600">Mật khẩu</label>
+        <input type="password" name="password" class="mt-1 w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-400 focus:outline-none" placeholder="Nhập mật khẩu" required>
+      </div>
+      <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition duration-200">
+        Đăng nhập
+      </button>
+    </form>
+  </div>
+
+</body>
+</html>

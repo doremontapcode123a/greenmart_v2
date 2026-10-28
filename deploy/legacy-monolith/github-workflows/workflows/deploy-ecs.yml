@@ -1,0 +1,87 @@
+name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      cluster_name:
+        description: 'ECS Cluster name'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      cluster_name:
+        description: 'ECS Cluster name'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REGISTRY: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com # Đã cập nhật theo registry cũ của bạn
+  ECR_REPOSITORY_APP: greenmart-app
+  ECR_REPOSITORY_NGINX: greenmart-nginx
+  TASK_FAMILY: greenmart-task
+  SERVICE_NAME: greenmart-service
+  CONTAINER_NAME_APP: web
+  CONTAINER_NAME_NGINX: nginx
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: false
+          
+      - name: Download current ECS task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.TASK_FAMILY }} \
+            --query taskDefinition > task-definition.json
+            
+      - name: Render Amazon ECS task definition for App
+        id: render-app
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME_APP }}
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_APP }}:${{ inputs.version }}
+          
+      # BƯỚC 2: Render Nginx (đầu vào là đầu ra của Bước 1)
+      - name: Render Amazon ECS task definition for Nginx
+        id: render-nginx
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-app.outputs.task-definition }}
+          container-name: ${{ env.CONTAINER_NAME_NGINX }}
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_NGINX }}:${{ inputs.version }}
+
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          # Sử dụng file json cuối cùng từ bước render-nginx để deploy
+          task-definition: ${{ steps.render-nginx.outputs.task-definition }}
+          service: ${{ env.SERVICE_NAME }}
+          cluster: ${{ inputs.cluster_name }}
+          wait-for-service-stability: true
+          
+      - name: Update Desired Count (Optional)
+        run: |
+          aws ecs update-service \
+            --cluster ${{ inputs.cluster_name }} \
+            --service ${{ env.SERVICE_NAME }} \
+            --desired-count 2
+          echo "Force set desired count to 2."

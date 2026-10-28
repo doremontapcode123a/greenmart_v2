@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản lý sản phẩm - GreenMart</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Thanh điều hướng -->
+  <nav class="bg-green-600 text-white px-6 py-4 flex justify-between items-center shadow">
+    <h1 class="text-2xl font-bold">GreenMart Admin</h1>
+    <div class="flex items-center gap-4">
+      <a href="/admin_panel/" class="hover:underline">🏠 Dashboard</a>
+      <a href="#" class="bg-white text-green-600 px-3 py-1 rounded font-medium">Đăng xuất</a>
+    </div>
+  </nav>
+
+<div class="max-w-lg mx-auto mt-10">
+  <h2 class="text-2xl font-bold mb-4">Sửa khuyến mãi</h2>
+  <form method="POST">
+    {% csrf_token %}
+    <label>Tên khuyến mãi</label>
+    <input name="name" class="border rounded w-full p-2 mb-2">
+
+    <label>Mã code</label>
+    <input name="code" class="border rounded w-full p-2 mb-2">
+
+    <label>Loại giảm giá</label>
+    <select name="discount_type" class="border rounded w-full p-2 mb-2">
+      <option value="money">Giảm theo số tiền</option>
+      <option value="percent">Giảm theo phần trăm</option>
+    </select>
+
+    <label>Giá trị giảm</label>
+    <input name="discount_value" type="number" class="border rounded w-full p-2 mb-2">
+
+    <label>Áp dụng cho</label>
+    <select name="apply_type" class="border rounded w-full p-2 mb-2">
+      <option value="order">Toàn đơn hàng</option>
+      <option value="product">Theo sản phẩm</option>
+      <option value="category">Theo danh mục</option>
+    </select>
+
+    <label>Ngày bắt đầu</label>
+    <input type="datetime-local" name="start_date" class="border rounded w-full p-2 mb-2">
+
+    <label>Ngày kết thúc</label>
+    <input type="datetime-local" name="end_date" class="border rounded w-full p-2 mb-2">
+
+    <label>Giá trị tối thiểu đơn hàng</label>
+    <input name="min_order_value" type="number" step="0.01" class="border rounded w-full p-2 mb-2">
+
+    <button class="bg-green-600 text-white px-4 py-2 rounded">Lưu</button>
+  </form>
+</div>

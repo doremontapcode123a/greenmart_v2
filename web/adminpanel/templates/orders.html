@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản lý đơn hàng - GreenMart</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Thanh điều hướng -->
+  <nav class="bg-green-600 text-white px-6 py-4 flex justify-between items-center shadow">
+    <h1 class="text-2xl font-bold">GreenMart Admin</h1>
+    <div class="flex items-center gap-4">
+      <a href="/admin_panel/" class="hover:underline">🏠 Dashboard</a>
+      <a href="/admin_panel/products/" class="hover:underline">🛒 Sản phẩm</a>
+      <a href="#" class="bg-white text-green-600 px-3 py-1 rounded font-medium">Đăng xuất</a>
+    </div>
+  </nav>
+
+  <!-- Nội dung chính -->
+  <main class="max-w-7xl mx-auto py-10 px-4">
+
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-3xl font-bold text-gray-800">📦 Quản lý đơn hàng</h2>
+      <input
+        type="text"
+        id="searchOrder"
+        placeholder="Tìm đơn hàng..."
+        class="px-4 py-2 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-64"
+      >
+    </div>
+
+    <!-- Bảng đơn hàng -->
+    <div class="bg-white rounded-lg shadow overflow-x-auto">
+      <table class="w-full border-collapse text-left">
+        <thead class="bg-green-600 text-white">
+          <tr>
+            <th class="p-3">#</th>
+            <th class="p-3">Khách hàng</th>
+            <th class="p-3">Tổng tiền</th>
+            <th class="p-3">Số lượng SP</th>
+            <th class="p-3">Ngày đặt</th>
+            <th class="p-3">Trạng thái</th>
+            <th class="p-3 text-center">Chi tiết</th>
+          </tr>
+        </thead>
+        <tbody id="orderTable">
+          {% for order in orders %}
+          <tr class="border-b hover:bg-gray-50 transition">
+            <td class="p-3">{{ forloop.counter }}</td>
+            <td class="p-3 font-semibold text-gray-800">
+              {% if order.customer %}
+                {{ order.customer.username }}
+              {% else %}
+                <span class="text-gray-500 italic">Khách ẩn danh</span>
+              {% endif %}
+            </td>
+            <td class="p-3 text-green-600 font-bold">{{ order.get_cart_total }}₫</td>
+            <td class="p-3">{{ order.get_cart_items }}</td>
+            <td class="p-3 text-gray-600">{{ order.date_order|date:"d/m/Y H:i" }}</td>
+            <td class="p-3">
+              {% if order.complete %}
+                <span class="px-2 py-1 bg-green-100 text-green-700 rounded text-sm">Hoàn tất</span>
+              {% else %}
+                <span class="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-sm">Đang xử lý</span>
+              {% endif %}
+            </td>
+            <td class="p-3 text-center">
+              <button 
+                onclick="toggleDetails('{{ order.id }}')"
+                class="text-blue-600 hover:underline"
+              >
+                Xem
+              </button>
+            </td>
+          </tr>
+
+          <!-- Chi tiết sản phẩm trong đơn -->
+          <tr id="detail-{{ order.id }}" class="hidden bg-gray-50">
+            <td colspan="7" class="p-4">
+              <h3 class="font-bold mb-2 text-gray-700">🧾 Chi tiết đơn hàng:</h3>
+              <ul class="ml-4 list-disc">
+                {% for item in order.items %}
+                <li class="mb-1 text-gray-700">
+                  {{ item.product.name }} — 
+                  {{ item.quantity }} x 
+                  <span class="text-green-600">{{ item.product.price }}₫</span>
+                  = <strong>{{ item.get_total }}₫</strong>
+                </li>
+                {% empty %}
+                <li class="text-gray-500 italic">Không có sản phẩm nào trong đơn này</li>
+                {% endfor %}
+              </ul>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-gray-500 py-6">Không có đơn hàng nào</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    // Ẩn/hiện chi tiết đơn hàng
+    function toggleDetails(id) {
+      const row = document.getElementById("detail-" + id);
+      row.classList.toggle("hidden");
+    }
+
+    // Tìm kiếm đơn hàng theo tên khách hoặc ID
+    const searchInput = document.getElementById("searchOrder");
+    const tableRows = document.querySelectorAll("#orderTable tr:not([id^='detail'])");
+
+    searchInput.addEventListener("keyup", () => {
+      const keyword = searchInput.value.toLowerCase();
+      tableRows.forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(keyword) ? "" : "none";
+      });
+    });
+  </script>
+
+</body>
+</html>

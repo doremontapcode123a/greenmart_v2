@@ -1,0 +1,2 @@
+-r ../../common/greenmart_common/requirements.txt
+django-jazzmin==3.0.1

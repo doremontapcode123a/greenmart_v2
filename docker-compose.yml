@@ -1,0 +1,170 @@
+# GreenMart – kiến trúc microservice.  Chạy:  cp .env.example .env  (điền giá trị)  &&  docker compose up -d --build
+# Chỉ có `gateway` publish port ra ngoài; các service và MySQL chỉ nằm trong mạng nội bộ.
+
+x-internal: &internal
+  SECRET_KEY: ${SECRET_KEY:?cần đặt SECRET_KEY trong .env}
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?cần đặt INTERNAL_API_TOKEN trong .env}
+  DB_HOST: mysql
+  DB_PORT: "3306"
+
+x-admin-env: &admin-env
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088}
+  DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-}
+  DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
+  DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
+  CREATE_SUPERUSER: "1"
+  RUN_COLLECTSTATIC: "1"
+
+x-healthcheck: &py-health
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 20s
+
+services:
+  mysql:
+    image: mysql:8.0
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?cần đặt MYSQL_ROOT_PASSWORD trong .env}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?}
+      PROMOTION_DB_PASSWORD: ${PROMOTION_DB_PASSWORD:?}
+      WEB_DB_PASSWORD: ${WEB_DB_PASSWORD:?}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  user-service:
+    build: { context: ., dockerfile: services/user-service/Dockerfile }
+    environment:
+      <<: [*internal, *admin-env]
+      DB_NAME: user_db
+      DB_USER: user_svc
+      DB_PASSWORD: ${USER_DB_PASSWORD}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost:8088}
+      PUBLIC_SCHEME: ${PUBLIC_SCHEME:-http}
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
+    volumes: [static_data:/staticfiles]
+    depends_on: { mysql: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/', timeout=3)"]
+      <<: *py-health
+    restart: unless-stopped
+
+  catalog-service:
+    build: { context: ., dockerfile: services/catalog-service/Dockerfile }
+    environment:
+      <<: [*internal, *admin-env]
+      DB_NAME: catalog_db
+      DB_USER: catalog_svc
+      DB_PASSWORD: ${CATALOG_DB_PASSWORD}
+      MEDIA_ROOT: /media
+    volumes:
+      - static_data:/staticfiles
+      - ./media:/media          # ảnh sản phẩm (đã có sẵn ảnh cũ trong thư mục này)
+    depends_on: { mysql: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/', timeout=3)"]
+      <<: *py-health
+    restart: unless-stopped
+
+  promotion-service:
+    build: { context: ., dockerfile: services/promotion-service/Dockerfile }
+    environment:
+      <<: *internal
+      DB_NAME: promotion_db
+      DB_USER: promotion_svc
+      DB_PASSWORD: ${PROMOTION_DB_PASSWORD}
+    depends_on: { mysql: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/', timeout=3)"]
+      <<: *py-health
+    restart: unless-stopped
+
+  order-service:
+    build: { context: ., dockerfile: services/order-service/Dockerfile }
+    environment:
+      <<: *internal
+      DB_NAME: order_db
+      DB_USER: order_svc
+      DB_PASSWORD: ${ORDER_DB_PASSWORD}
+      CATALOG_SERVICE_URL: http://catalog-service:8000
+      PROMOTION_SERVICE_URL: http://promotion-service:8000
+    depends_on:
+      mysql: { condition: service_healthy }
+      catalog-service: { condition: service_healthy }
+      promotion-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/', timeout=3)"]
+      <<: *py-health
+    restart: unless-stopped
+
+  web:
+    build: { context: ., dockerfile: web/Dockerfile }
+    environment:
+      <<: *internal
+      DB_NAME: web_db
+      DB_USER: web_svc
+      DB_PASSWORD: ${WEB_DB_PASSWORD}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088}
+      RUN_COLLECTSTATIC: "1"
+      USER_SERVICE_URL: http://user-service:8000
+      CATALOG_SERVICE_URL: http://catalog-service:8000
+      ORDER_SERVICE_URL: http://order-service:8000
+      PROMOTION_SERVICE_URL: http://promotion-service:8000
+    volumes: [static_data:/staticfiles]
+    depends_on:
+      mysql: { condition: service_healthy }
+      user-service: { condition: service_healthy }
+      catalog-service: { condition: service_healthy }
+      order-service: { condition: service_healthy }
+      promotion-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/healthz/', timeout=3, )"]
+      <<: *py-health
+    restart: unless-stopped
+
+  gateway:
+    build: { context: ., dockerfile: gateway/Dockerfile }
+    ports:
+      - "${GATEWAY_PORT:-8088}:80"
+    volumes:
+      - static_data:/staticfiles:ro
+      - ./media:/media:ro
+    depends_on:
+      web: { condition: service_healthy }
+    restart: unless-stopped
+
+  # Công cụ một lần: chuyển dữ liệu từ db.sqlite3 cũ.  docker compose --profile tools run --rm data-migrator
+  data-migrator:
+    profiles: ["tools"]
+    build: { context: ., dockerfile: scripts/Dockerfile }
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./legacy:/legacy:ro     # đặt db.sqlite3 cũ vào ./legacy/
+    depends_on:
+      user-service: { condition: service_healthy }
+      catalog-service: { condition: service_healthy }
+      order-service: { condition: service_healthy }
+      promotion-service: { condition: service_healthy }
+    entrypoint: ["sh", "-c", "python /scripts/migrate_sqlite_to_mysql.py --sqlite /legacy/db.sqlite3 --host mysql --user root --password \"$$MYSQL_ROOT_PASSWORD\" \"$$@\"", "--"]
+
+volumes:
+  mysql_data:
+  static_data:

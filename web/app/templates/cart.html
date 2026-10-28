@@ -1,0 +1,144 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Giỏ hàng - Green Grocer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+
+  <!-- Header -->
+  <header class="bg-green-700 text-white p-4 flex justify-between items-center">
+    <a href="{% url 'home' %}" class="text-2xl font-bold">GREEN <span class="text-yellow-300">MART</span></a>
+    <a href="{% url 'home' %}" class="bg-yellow-400 text-black px-4 py-2 rounded hover:bg-yellow-300">
+      ← Tiếp tục mua sắm
+    </a>
+  </header>
+
+  <!-- Giỏ hàng -->
+  <main class="p-8">
+    <h1 class="text-3xl font-bold text-green-800 mb-6">Giỏ hàng của bạn</h1>
+    <div class="bg-white shadow rounded-lg p-6">
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="bg-green-100 text-left">
+            <th class="p-3">Sản phẩm</th>
+            <th class="p-3">Số lượng</th>
+            <th class="p-3">Giá</th>
+            <th class="p-3">Thành tiền</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+          {% for product in products %}
+          <tr class="border-b">
+            <td class="p-3">{{product.product.name}}</td>
+            <td class="p-3">
+              <div class="flex items-center">
+                {{ product.quantity }}
+                <div class="flex flex-col items-center mr-2">
+                <form style="margin-bottom: -5px;"  method="post" action="{% url 'arrow_up' product.product.slug %}">
+                  {% csrf_token %}
+
+                  <button style="margin: 5px;"><img width="12"  src="{% static 'images/arrow-up.png' %}" alt=""></button>
+                </form>
+                <form method="post" action="{% url 'arrow_down' product.product.slug %}">
+                  {% csrf_token %}
+                  <button><img width="12" src="{% static 'images/arrow-down.png' %}" alt=""></button>
+                </form>
+                </div>
+                
+              </div>
+            </td>
+
+            <td class="p-3">{{product.product.price}}</td>
+            <td class="p-3 font-bold">{{product.get_total}}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        
+        <tr class="border-b">
+  <td class="p-3"><strong>Tổng số sản phẩm:</strong></td>
+  <td class="p-3">{{ order.get_cart_items }}</td>
+  <td class="p-3"><strong>Tổng tiền:</strong></td>
+  <td class="p-3 font-bold">
+    {% if order.promotion %}
+      {{ order.get_total_after_discount }}₫
+      <br>
+      <small>(Giảm {{ order.get_discount_amount }}₫ với mã <strong>{{ order.promotion.code }}</strong>)</small>
+    {% else %}
+      {{ order.get_cart_total }}₫
+    {% endif %}
+  </td>
+</tr>
+      </table>
+      <div class="flex justify-between mt-6">
+  <div class="text-left">
+    
+    
+      <a href="{% url 'promotion_list' %}">
+      <button class="bg-green-600 text-white px-6 py-3 rounded hover:bg-green-500">
+        Sử dụng mã khuyến mãi
+      </button>
+    </a>
+
+    
+  </div>
+
+  <div class="text-right">
+    
+    {% if order.get_cart_items > 0 %}
+    
+    <a href="{% url 'checkout' %}">
+        <button
+            id="checkout-btn"
+            class="bg-green-600 text-white px-6 py-3 rounded hover:bg-green-500"
+        >
+            Thanh toán
+        </button>
+    </a>
+
+    {% else %}
+
+    <button
+        id="checkout-btn"
+        disabled
+        class="bg-green-600 text-white px-6 py-3 rounded opacity-50 cursor-not-allowed"
+    >
+        Thanh toán
+    </button>
+
+    {% endif %}
+
+</div>
+</div>
+    </div>
+  </main>
+</body>
+{% if messages %}
+  <div id="alert" class="mt-4 space-y-2">
+    {% for message in messages %}
+      <div class="p-3 rounded-lg shadow
+                  {% if message.tags == 'success' %} bg-green-100 text-green-700 border border-green-300
+                  {% elif message.tags == 'warning' %} bg-yellow-100 text-yellow-700 border border-yellow-300
+                  {% elif message.tags == 'error' %} bg-red-100 text-red-700 border border-red-300
+                  {% else %} bg-gray-100 text-gray-700 border border-gray-300 {% endif %}">
+        {{ message }}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+<script>
+  
+  setTimeout(() => {
+    const alerts = document.querySelectorAll('#alert');
+    alerts.forEach(el => {
+      el.style.transition = "opacity 1s ease";
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 1000); 
+    });
+  }, 1000); 
+</script>
+</html>

@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Green Grocer - Rau củ sạch</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<nav class="bg-green-700 text-white px-6 py-4 flex justify-between items-center left-0 w-full shadow z-50">
+  <!-- Logo -->
+  <a href="{% url 'home' %}" class="text-2xl font-bold">
+    GREEN <span class="text-yellow-300">MART</span>
+  </a>
+
+  <!-- Menu -->
+  
+
+  <!-- Thanh tìm kiếm -->
+  <form action="{% url 'search' %}" method="get" class="hidden md:flex items-center mx-6 w-1/3">
+    
+    <input 
+      type="text" 
+      name="q" 
+      placeholder="Tìm kiếm sản phẩm bạn muốn..."
+      class="w-full px-4 py-2 rounded-l border border-gray-300 text-black focus:outline-none"
+    >
+    <button type="submit" class="bg-yellow-400 text-black px-4 py-2 rounded-r hover:bg-yellow-300">
+      🔍
+    </button>
+  </form>
+
+  <!-- Đăng nhập + Giỏ hàng -->
+  <div class="flex items-center gap-3">
+  {% if request.user.is_authenticated %}
+    <a href="{% url 'profile' %}"  class="bg-green-700 text-white px-4 py-2 rounded">
+      <u><i>👋 Xin chào, {{ request.user.username }}</i></u>
+    </a>
+    <a href="{% url 'logout' %}" 
+       class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-400">
+      Đăng xuất
+    </a>
+  {% else %}
+    <a href="{% url 'loginn' %}" 
+       class="bg-yellow-400 text-black px-4 py-2 rounded hover:bg-yellow-300">
+      Đăng nhập
+    </a>
+  {% endif %}
+
+  <div class="relative">
+    <a href="{% url 'cart' %}" 
+       class="bg-white text-green-700 px-4 py-2 rounded hover:bg-gray-100 relative">
+      🛒 Giỏ hàng
+      {% if items > 0 %}
+        <span class="absolute -top-1 -right-1 bg-red-600 text-white 
+                     text-[10px] font-bold w-5 h-5 flex items-center 
+                     justify-center rounded-full">
+          {{ items }}
+        </span>
+      {% endif %}
+    </a>
+  </div>
+</div>
+</nav>
+
+<div class="container mx-auto px-6 py-8 grid grid-cols-1 md:grid-cols-4 gap-6 mg-top-200">
+
+    <!-- Sidebar bên trái -->
+    <aside class="md:col-span-1 space-y-6">
+
+        <!-- Danh mục -->
+        <div class="bg-white shadow rounded p-4">
+            <h2 class="text-lg font-bold border-b pb-2 mb-3 text-green-700">DANH MỤC SẢN PHẨM</h2>
+            {% for category in categories %}
+            <ul class="space-y-2">
+                <li><a href="{% url 'productPage'  %}?category={{category.slug}}" class="block hover:text-green-600">{{category.name}}</a></li>
+            </ul>
+            {% endfor %}
+        </div>
+
+        <!-- Tìm kiếm -->
+        <div class="bg-white shadow rounded p-4">
+            <h2 class="text-lg font-bold border-b pb-2 mb-3 text-green-700">TÌM KIẾM SẢN PHẨM</h2>
+            <form method="get" action="#">
+                <input type="text" placeholder="Tìm kiếm sản phẩm..." 
+                       class="w-full border rounded px-3 py-2 focus:outline-green-600">
+                <button type="submit" 
+                        class="w-full mt-3 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                        Tìm kiếm
+                </button>
+            </form>
+        </div>
+        
+
+        <!-- Sản phẩm bán chạy -->
+        <div class="bg-white shadow rounded p-4">
+            <h2 class="text-lg font-bold border-b pb-2 mb-3 text-green-700">SẢN PHẨM BÁN CHẠY</h2>
+            <ul class="space-y-3">
+                <li>
+                    <a href="#" class="flex items-center space-x-3">
+                        <img src="/static/images/no-image.png" alt="sp1" class="w-12 h-12 object-cover rounded">
+                        <span>Mì Kokomi Lẩu Bò</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="#" class="flex items-center space-x-3">
+                        <img src="/static/images/no-image.png" alt="sp2" class="w-12 h-12 object-cover rounded">
+                        <span>Sữa hộp Vinamilk</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </aside>
+
+    <!-- Nội dung chính -->
+    <main class="md:col-span-3 bg-white shadow rounded p-6">
+
+        <!-- Thông tin sản phẩm -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            
+            <!-- Hình ảnh -->
+            <div>
+                {% if product.image %}
+                    <img src="{{ product.image.url }}" alt="{{ product.name }}" class="w-full h-96 object-cover rounded shadow">
+                {% else %}
+                    <img src="/static/images/no-image.png" alt="No image" class="w-full h-96 object-cover rounded">
+                {% endif %}
+            </div>
+
+            <!-- Chi tiết -->
+            <div>
+                <h1 class="text-2xl font-bold text-green-700">{{ product.name }}</h1>
+                <p class="text-red-600 text-xl font-bold mt-2">{{ product.price }}₫ / {{ product.get_unit_display }}</p>
+                
+                <!-- Nút số lượng -->
+                <form method="post" action="{% url 'add_to_cart_detail' product.slug %}">
+    {% csrf_token %}
+
+    <div class="flex items-center mt-3 space-x-2">
+        <button type="button" id="btn-minus" class="px-3 py-1 border rounded">
+            -
+        </button>
+
+        <input 
+            name="quantity" 
+            id="quantity" 
+            type="text" 
+            value="1"
+            min="1"
+            class="w-12 text-center border rounded"
+        >
+
+        <button type="button" id="btn-plus" class="px-3 py-1 border rounded">
+            +
+        </button>
+    </div>
+
+    <p id="quantity-error" class="text-red-500 text-sm mt-2 hidden">
+        Số lượng phải là số nguyên dương lớn hơn 0
+    </p>
+
+    {% if product.status == "available" %}
+<button 
+    type="submit"
+    id="buy-button"
+    class="mt-4 bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 transition"
+>
+    MUA HÀNG
+</button>
+{% else %}
+    <p class="text-gray-500 mt-4">Hết hàng</p>
+    {% endif %}
+</form>
+                    
+            </div>
+        </div>
+
+      
+<!-- Phần đánh giá -->
+<div class="mt-10">
+  <ul class="flex border-b">
+    <li class="mr-6">
+      <a href="#description" class="tab-link inline-block py-2 px-4 font-bold text-green-600 active-tab">
+        Mô tả
+      </a>
+    </li>
+    <li class="mr-6">
+      <a href="#reviews" class="tab-link inline-block py-2 px-4 hover:text-green-600">
+        Đánh giá ({{ review_count }})
+      </a>
+    </li>
+  </ul>
+
+  <!-- Nội dung Mô tả -->
+  <div id="description" class="tab-content mt-4 text-gray-700">
+    {{ product.description|default:"Chưa có mô tả cho sản phẩm này." }}
+  </div>
+
+  <!-- Nội dung Đánh giá -->
+  <div id="reviews" class="tab-content mt-4 text-gray-700 hidden">
+    {% if review_count %}
+      {% for review in reviews %}
+  <div class="border rounded-lg p-3 mb-4 bg-white shadow-sm">
+    <p class="font-semibold text-green-700">{{ review.user.username }}({{review.rating}}sao)</p>
+    {% if review.rating == 5 %}
+    <p class="font-semibold text-green-700">🌟🌟🌟🌟🌟</p>
+    {% elif review.rating == 4 %}
+    <p class="font-semibold text-green-700">🌟🌟🌟🌟</p>
+    {% elif review.rating == 3 %}
+    <p class="font-semibold text-green-700">🌟🌟🌟</p>
+    {% elif review.rating == 2 %}
+    <p class="font-semibold text-green-700">🌟🌟</p>
+    {% else %}
+    <p class="font-semibold text-green-700">🌟</p>
+    {% endif %}
+
+
+    <p class="mt-1">{{ review.comment }}</p>
+    <small class="text-gray-500">{{ review.created_at|date:"d/m/Y H:i" }}</small>
+
+    <!-- Nút trả lời -->
+    <button onclick="toggleReplyForm({{review.id}})" class="text-sm text-blue-600 hover:underline ml-2">
+      Trả lời
+    </button>
+
+    <!-- Form trả lời (ẩn mặc định) -->
+    <form id="reply-form-{{ review.id }}" action="{% url 'reply_review' review.id %}" method="POST"
+          class="mt-2 hidden">
+      {% csrf_token %}
+      <input type="text" name="content" placeholder="Viết phản hồi..." required
+             class="border rounded px-3 py-1 w-full text-sm focus:outline-none focus:ring-2 focus:ring-green-400">
+      <button type="submit" class="text-white bg-green-600 px-3 py-1 rounded text-sm mt-1 hover:bg-green-500">
+        Gửi
+      </button>
+    </form>
+
+    <!-- Hiển thị phản hồi -->
+    {% for reply in review.replies %}
+      <div class="ml-8 mt-3 bg-gray-50 border-l-2 pl-3 py-1 rounded">
+        <p class="font-semibold text-green-700 text-sm">{{ reply.user.username }}</p>
+        <p class="text-sm">{{ reply.comment }}</p>
+        <small class="text-gray-400">{{ reply.created_at|date:"d/m/Y H:i" }}</small>
+      </div>
+    {% endfor %}
+  </div>
+{% empty %}
+  <p>Chưa có đánh giá nào cho sản phẩm này.</p>
+{% endfor %}
+    {% else %}
+      <p class="text-gray-500">Chưa có đánh giá nào cho sản phẩm này.</p>
+    {% endif %}
+    {% if user.is_authenticated %}
+      <form method="POST" action="{% url 'add_review' product.slug %}" class="mt-6 space-y-4">
+        {% csrf_token %}
+        <div>
+    <label class="block mb-1 font-medium text-gray-700">Số sao:</label>
+    <div id="rating-stars" class="flex space-x-1 text-3xl cursor-pointer">
+      <span data-value="1" class="star text-gray-300 hover:text-yellow-400">★</span>
+      <span data-value="2" class="star text-gray-300 hover:text-yellow-400">★</span>
+      <span data-value="3" class="star text-gray-300 hover:text-yellow-400">★</span>
+      <span data-value="4" class="star text-gray-300 hover:text-yellow-400">★</span>
+      <span data-value="5" class="star text-gray-300 hover:text-yellow-400">★</span>
+    </div>
+    <input type="hidden" name="rating" id="rating-value" value="0">
+  </div>
+        <div>
+          <label class="block mb-1 font-medium text-gray-700">Nhận xét:</label>
+          <textarea name="comment" rows="3" required
+                    class="border rounded-lg px-3 py-2 w-full"></textarea>
+        </div>
+        <button type="submit"
+                class="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700">
+          Gửi đánh giá
+        </button>
+      </form>
+    {% else %}
+      <p class="text-gray-600 mt-4">
+        <a href="{% url 'loginn' %}" class="text-green-600 hover:underline">Đăng nhập</a> để viết đánh giá.
+      </p>
+    {% endif %}
+  </div>
+</div>
+    </main>
+    {% if messages %}
+      <div id="toast-container" class="fixed top-20 right-5 z-50 space-y-2">
+      {% for message in messages %}
+        <div class="toast bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium 
+                    transition-opacity duration-1000 ease-in-out opacity-100">
+            {{ message }}
+        </div>
+      {% endfor %}
+      </div>
+    {% endif %}
+    <script>
+      
+      const quantity = document.getElementById("quantity")
+      const links = document.querySelectorAll('.tab-link');
+      const contents = document.querySelectorAll('.tab-content');
+
+     
+
+
+
+      
+
+  links.forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      
+      // Xóa active tab hiện tại
+      links.forEach(l => l.classList.remove('text-green-600', 'font-bold', 'active-tab'));
+      contents.forEach(c => c.classList.add('hidden'));
+
+      // Kích hoạt tab được chọn
+      link.classList.add('text-green-600', 'font-bold', 'active-tab');
+      const target = document.querySelector(link.getAttribute('href'));
+      target.classList.remove('hidden');
+
+      // Cuộn mượt đến vị trí phần nội dung
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  const stars = document.querySelectorAll('#rating-stars .star');
+  const ratingInput = document.getElementById('rating-value');
+  let selectedRating = 0;
+
+  stars.forEach(star => {
+    // Khi rê chuột qua sao
+    star.addEventListener('mouseover', () => {
+      const value = parseInt(star.dataset.value);
+      stars.forEach(s => {
+        s.classList.toggle('text-yellow-400', parseInt(s.dataset.value) <= value);
+        s.classList.toggle('text-gray-300', parseInt(s.dataset.value) > value);
+      });
+    });
+
+    // Khi rời chuột khỏi vùng sao
+    star.addEventListener('mouseleave', () => {
+      stars.forEach(s => {
+        s.classList.toggle('text-yellow-400', parseInt(s.dataset.value) <= selectedRating);
+        s.classList.toggle('text-gray-300', parseInt(s.dataset.value) > selectedRating);
+      });
+    });
+
+    // Khi click chọn sao
+    star.addEventListener('click', () => {
+      selectedRating = parseInt(star.dataset.value);
+      ratingInput.value = selectedRating;
+    });
+  });
+  function toggleReplyForm(id) {
+    const form = document.getElementById(`reply-form-${id}`);
+    form.classList.toggle('hidden');
+  }
+
+    const quantityInput = document.getElementById("quantity");
+    const btnPlus = document.getElementById("btn-plus");
+    const btnMinus = document.getElementById("btn-minus");
+    const errorText = document.getElementById("quantity-error");
+
+    // Nút +
+    btnPlus.addEventListener("click", () => {
+        let value = parseInt(quantityInput.value) || 1;
+        quantityInput.value = value + 1;
+        validateQuantity();
+        hideError();
+    });
+
+    // Nút -
+    btnMinus.addEventListener("click", () => {
+        let value = parseInt(quantityInput.value) || 1;
+
+        if (value > 1) {
+            quantityInput.value = value - 1;
+        }
+
+        validateQuantity();
+    });
+
+    // Kiểm tra khi nhập
+   quantityInput.addEventListener("input", validateQuantity);
+
+const buyButton = document.getElementById("buy-button");
+
+function validateQuantity() {
+    let value = quantityInput.value.trim();
+
+    // Sai dữ liệu
+    if (!/^[1-9]\d*$/.test(value)) {
+
+        errorText.classList.remove("hidden");
+
+        quantityInput.classList.add(
+            "border-red-500",
+            "cursor-not-allowed"
+        );
+
+        // KHÓA NÚT
+        buyButton.disabled = true;
+
+        // Làm mờ nút
+        buyButton.classList.add(
+            "opacity-50",
+            "cursor-not-allowed"
+        );
+
+        return false;
+    }
+
+    // Hợp lệ
+    errorText.classList.add("hidden");
+
+    quantityInput.classList.remove(
+        "border-red-500",
+        "cursor-not-allowed"
+    );
+
+    // MỞ KHÓA NÚT
+    buyButton.disabled = false;
+
+    buyButton.classList.remove(
+        "opacity-50",
+        "cursor-not-allowed"
+    );
+
+    return true;
+}
+
+    function hideError() {
+        errorText.classList.add("hidden");
+        quantityInput.classList.remove("border-red-500");
+    }
+
+    // Chặn submit nếu sai
+    document.querySelector("form").addEventListener("submit", function(e) {
+        if (!validateQuantity()) {
+            e.preventDefault();
+        }
+    });
+
+    </script>
+    
+
+</div>

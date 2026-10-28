@@ -1,0 +1,252 @@
+# Nội dung nginx.conf/proxy_params tương ứng gateway/ trong repo (docker compose) – sửa một nơi thì sửa cả hai.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-nginx
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: greenmart
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+        include       /etc/nginx/mime.types;
+        client_max_body_size 10m;
+
+        # Đứng sau Ingress đã kết thúc TLS: giữ scheme gốc (https) để Django nhận đúng khi kiểm tra CSRF/cookie.
+        map $http_x_forwarded_proto $fwd_proto { default $http_x_forwarded_proto; "" $scheme; }
+
+        upstream web             { server web:8000; }
+        upstream user_service    { server user-service:8000; }
+        upstream catalog_service { server catalog-service:8000; }
+
+        server {
+            listen 80;
+
+            location /static/ { alias /staticfiles/; }
+            location /media/  { alias /media/; }
+
+            location /admin/catalog/ { proxy_pass http://catalog_service; include /etc/nginx/proxy_params; }
+            location /admin/         { proxy_pass http://user_service;    include /etc/nginx/proxy_params; }
+            location /               { proxy_pass http://web;             include /etc/nginx/proxy_params; }
+        }
+    }
+  proxy_params: |
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $fwd_proto;
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: greenmart
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/part-of: greenmart
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+      - name: static-web
+        image: greenmart/web
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - manage.py
+        - collectstatic
+        - --noinput
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: SECRET_KEY
+        - name: INTERNAL_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: INTERNAL_API_TOKEN
+        - name: DB_NAME
+          value: unused
+        - name: DB_USER
+          value: unused
+        - name: DB_PASSWORD
+          value: unused
+        - name: STATIC_ROOT
+          value: /staticfiles
+        volumeMounts:
+        - name: static
+          mountPath: /staticfiles
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - SETGID
+            - SETUID
+      - name: static-user
+        image: greenmart/user-service
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - manage.py
+        - collectstatic
+        - --noinput
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: SECRET_KEY
+        - name: INTERNAL_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: INTERNAL_API_TOKEN
+        - name: DB_NAME
+          value: unused
+        - name: DB_USER
+          value: unused
+        - name: DB_PASSWORD
+          value: unused
+        - name: STATIC_ROOT
+          value: /staticfiles
+        volumeMounts:
+        - name: static
+          mountPath: /staticfiles
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - SETGID
+            - SETUID
+      - name: static-catalog
+        image: greenmart/catalog-service
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - manage.py
+        - collectstatic
+        - --noinput
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: SECRET_KEY
+        - name: INTERNAL_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: INTERNAL_API_TOKEN
+        - name: DB_NAME
+          value: unused
+        - name: DB_USER
+          value: unused
+        - name: DB_PASSWORD
+          value: unused
+        - name: STATIC_ROOT
+          value: /staticfiles
+        volumeMounts:
+        - name: static
+          mountPath: /staticfiles
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - SETGID
+            - SETUID
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        ports:
+        - name: http
+          containerPort: 80
+        readinessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        - name: nginx-conf
+          mountPath: /etc/nginx/proxy_params
+          subPath: proxy_params
+          readOnly: true
+        - name: static
+          mountPath: /staticfiles
+          readOnly: true
+        - name: media
+          mountPath: /media
+          readOnly: true
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: gateway-nginx
+      - name: static
+        emptyDir: {}
+      - name: media
+        persistentVolumeClaim:
+          claimName: greenmart-media
+          readOnly: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: greenmart
+spec:
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+  - name: http
+    port: 80
+    targetPort: http

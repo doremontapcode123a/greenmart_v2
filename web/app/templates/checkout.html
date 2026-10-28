@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Thanh toán - Green Grocer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+
+  <!-- Header -->
+  <header class="bg-green-700 text-white p-4 flex justify-between items-center">
+    <a href="{% url 'home' %}" class="text-2xl font-bold">GREEN <span class="text-yellow-300">MART</span></a>
+    <a href="{% url 'cart' %}" class="bg-yellow-400 text-black px-4 py-2 rounded hover:bg-yellow-300">
+      ← Giỏ hàng
+    </a>
+  </header>
+
+  <!-- Checkout -->
+  <main class="p-8 max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold text-green-800 mb-6">Thông tin thanh toán</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+      
+      <!-- Form nhập thông tin -->
+      
+      <div class="bg-white p-6 shadow rounded-lg">
+        <h2 class="text-xl font-semibold mb-4">Thông tin khách hàng</h2>
+        {% if profile.full_name %}
+        <form method="POST">
+         
+        {% csrf_token %}
+
+    <div class="mb-4">
+  <label class="block font-medium">
+    Họ và tên <span class="text-red-500">*</span>
+  </label>
+  <input 
+    type="text" 
+    name="full_name" 
+    value="{{ profile.full_name }}" 
+    required
+    class="w-full border p-2 rounded focus:ring-2 focus:ring-green-400"
+  >
+</div>
+
+<div class="mb-4">
+  <label class="block font-medium">
+    Số điện thoại <span class="text-red-500">*</span>
+  </label>
+  <input 
+    type="text" 
+    name="phone" 
+    value="{{ profile.phone }}" 
+    required
+    class="w-full border p-2 rounded focus:ring-2 focus:ring-green-400"
+  >
+</div>
+
+<div class="mb-4">
+  <label class="block font-medium">
+    Địa chỉ giao hàng <span class="text-red-500">*</span>
+  </label>
+  <textarea 
+    name="address" 
+    rows="3"
+    required
+    class="w-full border p-2 rounded focus:ring-2 focus:ring-green-400"
+  >{{ profile.address }}</textarea>
+</div>
+
+    
+
+          <select class="w-full border p-2 rounded mb-4">
+            <option>Thanh toán khi nhận hàng (COD)</option>
+            <option>Chuyển khoản ngân hàng</option>
+            <option>Ví điện tử (Momo, ZaloPay...)</option>
+          </select>
+        </form>
+        {% else %}
+        <form method="POST">
+         
+        {% csrf_token %}
+
+    <div class="mb-4">
+      <label class="block font-medium">Họ và tên</label>
+      <input placeholder="VD:Nguyen Van A" type="text" name="full_name" value="" 
+             class="w-full border p-2 rounded focus:ring-2 focus:ring-green-400">
+    </div>
+
+    <div class="mb-4">
+      <label class="block font-medium">Số điện thoại</label>
+      <input placeholder="VD:0123456789" type="text" name="phone" value="" 
+             class="w-full border p-2 rounded focus:ring-2 focus:ring-green-400">
+    </div>
+
+    <div class="mb-4">
+      <label class="block font-medium">Địa chỉ giao hàng</label>
+      <textarea placeholder="VD:123, Đường ABC, Quận XYZ" name="address" rows="3"
+                class="w-full border p-2 rounded focus:ring-2 focus:ring-green-400"></textarea>
+    </div>
+
+    
+
+          <select class="w-full border p-2 rounded mb-4">
+            <option>Thanh toán khi nhận hàng (COD)</option>
+            <option>Chuyển khoản ngân hàng</option>
+            <option>Ví điện tử (Momo, ZaloPay...)</option>
+          </select>
+        </form>
+        {% endif %}
+      </div>
+
+
+      <div class="bg-white p-6 shadow rounded-lg">
+  <h2 class="text-xl font-semibold mb-4">Đơn hàng của bạn</h2>
+  
+  <div class="order-summary p-4 border rounded-lg bg-gray-50">
+  <h3 class="font-semibold text-green-700 mb-2">Đơn hàng của bạn</h3>
+
+  {% for item in products %}
+    <div class="flex justify-between mb-1">
+      <span>{{ item.product.name }} x {{ item.quantity }}</span>
+      <span>{{ item.get_total }}₫</span>
+    </div>
+  {% endfor %}
+
+  {% if order.promotion %}
+    <hr class="my-2 border-gray-300">
+    <div class="flex justify-between text-green-700 font-semibold">
+      <span>Mã khuyến mãi ({{ order.promotion.code }}):</span>
+      <span>-{{ discount_amount }}₫</span>
+    </div>
+    <div class="flex justify-between text-black font-bold mt-2">
+      <span>Thành tiền cần thanh toán:</span>
+      <span>{{ total_money }}₫</span>
+    </div>
+  {% else %}
+    <hr class="my-2 border-gray-300">
+    <div class="flex justify-between text-black font-bold mt-2">
+      <span>Tổng cộng:</span>
+      <span>{{ total_money }}₫</span>
+    </div>
+  {% endif %}
+
+ 
+{% if products %}
+    <a href="{% url 'complete' %}">
+    <button 
+  id="orderBtn"
+  disabled
+  class="w-full bg-gray-400 text-white py-2 rounded-lg cursor-not-allowed"
+>
+  Xác nhận đặt hàng
+</button>
+    </a>
+{% else %}
+
+<div class="text-center text-red-500 font-medium py-4">
+    Không có sản phẩm trong đơn hàng
+  </div>
+
+  <button 
+    disabled
+    class="w-full bg-gray-400 text-white py-2 rounded-lg cursor-not-allowed mt-4"
+  >
+    Xác nhận đặt hàng
+  </button>
+
+{% endif %}
+</div>
+<script>
+  const fullName = document.querySelector('input[name="full_name"]');
+  const phone = document.querySelector('input[name="phone"]');
+  const address = document.querySelector('textarea[name="address"]');
+  const orderBtn = document.getElementById('orderBtn');
+
+  function validateForm() {
+    const isValid =
+      fullName.value.trim() !== '' &&
+      phone.value.trim() !== '' &&
+      address.value.trim() !== '';
+
+    if (isValid) {
+      orderBtn.disabled = false;
+      orderBtn.classList.remove('bg-gray-400', 'cursor-not-allowed');
+      orderBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+
+      orderBtn.onclick = () => {
+        window.location.href = "{% url 'complete' %}";
+      };
+    } else {
+      orderBtn.disabled = true;
+      orderBtn.classList.add('bg-gray-400', 'cursor-not-allowed');
+      orderBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+
+      orderBtn.onclick = null;
+    }
+  }
+
+  fullName.addEventListener('input', validateForm);
+  phone.addEventListener('input', validateForm);
+  address.addEventListener('input', validateForm);
+
+  validateForm();
+</script>

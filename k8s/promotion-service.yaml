@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promotion-service
+  labels:
+    app.kubernetes.io/name: promotion-service
+    app.kubernetes.io/part-of: greenmart
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: promotion-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: promotion-service
+        app.kubernetes.io/part-of: greenmart
+        greenmart/db-client: 'true'
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: app
+        image: greenmart/promotion-service
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: greenmart-config
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: SECRET_KEY
+        - name: INTERNAL_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: INTERNAL_API_TOKEN
+        - name: DB_NAME
+          value: promotion_db
+        - name: DB_USER
+          value: promotion_svc
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: greenmart-secrets
+              key: PROMOTION_DB_PASSWORD
+        - name: RUN_MIGRATE
+          value: '0'
+        readinessProbe:
+          httpGet:
+            path: /health/
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 192Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - SETGID
+            - SETUID
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: promotion-service
+  labels:
+    app.kubernetes.io/name: promotion-service
+    app.kubernetes.io/part-of: greenmart
+spec:
+  selector:
+    app.kubernetes.io/name: promotion-service
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http

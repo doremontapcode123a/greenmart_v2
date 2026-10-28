@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thêm sản phẩm mới</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 flex flex-col min-h-screen">
+
+  <!-- Thanh điều hướng -->
+  <nav class="bg-green-600 text-white px-6 py-4 flex justify-between items-center shadow">
+      <h1 class="text-2xl font-bold">GreenMart Admin</h1>
+      <div class="flex items-center gap-4">
+        <a href="/admin_panel/" class="hover:underline">🏠 Dashboard</a>
+        <a href="#" class="bg-white text-green-600 px-3 py-1 rounded font-medium">Đăng xuất</a>
+      </div>
+  </nav>
+
+  <!-- Form thêm sản phẩm -->
+  <div class="flex justify-center flex-1 items-center">
+    <div class="bg-white w-full max-w-2xl rounded-2xl shadow-lg p-8 mt-6">
+      <h2 class="text-2xl font-bold text-center text-teal-700 mb-6">➕ Thêm sản phẩm mới</h2>
+
+      <form action="" method="post" id="productForm" enctype="multipart/form-data" class="space-y-5 w-full">
+        {% csrf_token %}
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Tên sản phẩm</label>
+        <input type="text" id="name" name="name" required
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+               placeholder="Nhập tên sản phẩm...">
+      </div>
+
+      <!-- Danh mục -->
+      
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Danh mục</label>
+        <select id="category" name="category" required
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none"> 
+                
+          <option value="">-- Chọn danh mục --</option>
+          {% for cate in categories %}
+          <option value="{{cate.id}}">{{cate.name}}</option>
+          
+          {% endfor %}
+        </select>
+      </div>
+      
+
+      <!-- Giá -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Giá (₫)</label>
+        <input type="number" id="price" name="price" min="0" step="0.01" required
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+               placeholder="Nhập giá sản phẩm...">
+      </div>
+
+      <!-- Đơn vị -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Đơn vị</label>
+        <select id="unit" name="unit" required
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+          <option value="kg">Kilogram</option>
+          <option value="gr">Gram</option>
+          <option value="bó">Bó</option>
+          <option value="túi">Túi</option>
+          <option value="quả">Quả</option>
+        </select>
+      </div>
+
+      <!-- Xuất xứ -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Xuất xứ</label>
+        <select id="origin" name="origin"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+          <option value="VN">Việt Nam</option>
+          <option value="US">Mỹ</option>
+          <option value="AU">Úc</option>
+          <option value="JP">Nhật Bản</option>
+          <option value="KR">Hàn Quốc</option>
+          <option value="TH">Thái Lan</option>
+          <option value="OT">Khác</option>
+        </select>
+      </div>
+
+      <!-- Tồn kho -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Số lượng tồn kho</label>
+        <input type="number" id="stock" name="stock" min="0" required
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+               placeholder="Nhập số lượng tồn...">
+      </div>
+
+      <!-- Trạng thái -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Trạng thái</label>
+        <select id="status" name="status"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+          <option value="available">Còn hàng</option>
+          <option value="out_of_stock">Hết hàng</option>
+          <option value="hidden">Ẩn</option>
+        </select>
+      </div>
+
+      <!-- Mô tả -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Mô tả sản phẩm</label>
+        <textarea id="description" name="description" rows="3"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                  placeholder="Nhập mô tả..."></textarea>
+      </div>
+
+      <!-- Ảnh sản phẩm -->
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Ảnh sản phẩm</label>
+        <input type="file" id="image" name="image" accept="image/*"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+        <div id="previewContainer" class="mt-3 flex justify-center">
+          <img id="previewImage" class="hidden w-40 h-40 object-cover rounded-lg border border-teal-400 shadow-sm">
+        </div>
+      </div>
+
+      <!-- Sản phẩm nổi bật -->
+      <div class="flex items-center gap-2">
+        <input type="checkbox" id="is_featured" name="is_featured"
+               class="w-5 h-5 text-teal-600 border-gray-300 rounded focus:ring-teal-500">
+        <label for="is_featured" class="font-medium text-gray-700">Đặt làm sản phẩm nổi bật</label>
+      </div>
+
+      <!-- Nút -->
+      <button type="submit"
+          class="w-full bg-teal-600 text-white font-semibold py-2 rounded-lg hover:bg-teal-700 transition">
+    Thêm sản phẩm
+  </button>
+
+      <p id="successMsg" class="text-green-600 text-center font-medium hidden mt-3">
+        ✅ Thêm sản phẩm thành công!
+      </p>
+    </form>
+  </div>
+
+  <script>
+  
+    const imageInput = document.getElementById("image");
+    const preview = document.getElementById("previewImage");
+    imageInput.addEventListener("change", () => {
+      const file = imageInput.files[0];
+      if (file) {
+        preview.src = URL.createObjectURL(file);
+        preview.classList.remove("hidden");
+      } else preview.classList.add("hidden");
+    });
+
+    
+  </script>
+</body>
+</html>

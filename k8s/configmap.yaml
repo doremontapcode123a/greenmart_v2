@@ -1,0 +1,27 @@
+# Cấu hình không bí mật dùng chung. ĐỔI các giá trị có domain (PUBLIC_HOST, CSRF_TRUSTED_ORIGINS, WEB_ALLOWED_HOSTS).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenmart-config
+  labels:
+    app.kubernetes.io/name: config
+    app.kubernetes.io/part-of: greenmart
+data:
+  DEBUG: 'False'
+  LOG_LEVEL: INFO
+  DB_HOST: mysql
+  DB_PORT: '3306'
+  USER_SERVICE_URL: http://user-service:8000
+  CATALOG_SERVICE_URL: http://catalog-service:8000
+  ORDER_SERVICE_URL: http://order-service:8000
+  PROMOTION_SERVICE_URL: http://promotion-service:8000
+  PUBLIC_HOST: greenmart.example.com
+  PUBLIC_SCHEME: https
+  CSRF_TRUSTED_ORIGINS: https://greenmart.example.com
+  WEB_ALLOWED_HOSTS: greenmart.example.com,localhost
+  EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+  EMAIL_HOST: smtp.gmail.com
+  EMAIL_PORT: '587'
+  EMAIL_USE_TLS: 'True'
+  EMAIL_HOST_USER: ''
+  DEFAULT_FROM_EMAIL: ''

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<header class="bg-green-700 text-white p-4 flex justify-between items-center">
+    <a href="{% url 'home' %}" class="text-2xl font-bold">GREEN <span class="text-yellow-300">MART</span></a>
+    <a href="{% url 'cart' %}" class="bg-yellow-400 text-black px-4 py-2 rounded hover:bg-yellow-300">
+      ← Quay lại giỏ hàng
+    </a>
+  </header>
+<body>
+    <h2 class="text-2xl font-bold text-green-700 mb-6 text-center">🎁 Danh sách khuyến mãi</h2>
+{% if promotions %}
+<div class="grid md:grid-cols-2 gap-6">
+      {% for promo in promotions %}
+        <div class="border border-gray-200 rounded-xl p-5 hover:shadow-md transition">
+          <h3 class="text-lg font-semibold text-gray-800 mb-1">{{ promo.name }}</h3>
+          <p class="text-sm text-gray-600 mb-2">
+            <span class="font-medium text-green-600">Mã:</span> {{ promo.code }}
+          </p>
+
+          <ul class="text-sm text-gray-700 space-y-1">
+            <li>💰 <span class="font-semibold">Loại giảm giá:</span> {{ promo.get_discount_type_display }}</li>
+            <li>🛒 <span class="font-semibold">Hình thức áp dụng:</span> {{ promo.get_apply_type_display }}</li>
+            <li>💸 <span class="font-semibold">Giá trị giảm:</span>
+              {% if promo.discount_type == 'percent' %}
+                {{ promo.discount_value }}%
+              {% else %}
+                {{ promo.discount_value }} ₫
+              {% endif %}
+            </li>
+            <li>📅 <span class="font-semibold">Ngày bắt đầu:</span> {{ promo.start_date|date:"d/m/Y" }}</li>
+            <li>📅 <span class="font-semibold">Ngày kết thúc:</span> {{ promo.end_date|date:"d/m/Y" }}</li>
+            <li>📦 <span class="font-semibold">Giá trị đơn hàng tối thiểu:</span> {{ promo.min_order_value }} ₫</li>
+            <li>
+              {% if promo.is_active %}
+                <span class="text-green-600 font-semibold">Đang hoạt động</span>
+              {% else %}
+                <span class="text-red-500 font-semibold">Hết hạn</span>
+              {% endif %}
+            </li>
+          </ul>
+
+          <div class="mt-3 text-right">
+            
+          
+          {% if order.promotion and order.promotion.id == promo.id %}
+            <form method="post" action="{% url 'cancel_promotion' promo.id %}" class="mt-3">
+            {% csrf_token %}
+              <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-green-500">
+                Hủy Áp dụng
+              </button>
+            </form>
+
+            {% else %}
+            <form method="post" action="{% url 'use_promotion' promo.id %}" class="mt-3">
+                  {% csrf_token %}
+              <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-500">
+                Áp dụng
+              </button>
+            </form>
+          {% endif %}
+          
+        
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-gray-600 text-center">Không có khuyến mãi nào.</p>
+  {% endif %}
+</body>
+</html>
