@@ -1,0 +1,36 @@
+# Triển khai:  kubectl apply -k k8s/base   (hoặc overlay: k8s/overlays/eks)   (sau khi đã tạo namespace + secret, xem README.md)
+# `images:` – đổi newName/newTag thành image bạn đã build & push.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: greenmart
+resources:
+- namespace.yaml
+- configmap.yaml
+- mysql.yaml
+- media-pvc.yaml
+- migrate-jobs.yaml
+- user-service.yaml
+- catalog-service.yaml
+- order-service.yaml
+- promotion-service.yaml
+- web.yaml
+- gateway.yaml
+- ingress.yaml
+- hpa.yaml
+- networkpolicy.yaml
+images:
+- name: greenmart/user-service
+  newName: registry.example.com/greenmart/user-service
+  newTag: 1.0.0
+- name: greenmart/catalog-service
+  newName: registry.example.com/greenmart/catalog-service
+  newTag: 1.0.0
+- name: greenmart/order-service
+  newName: registry.example.com/greenmart/order-service
+  newTag: 1.0.0
+- name: greenmart/promotion-service
+  newName: registry.example.com/greenmart/promotion-service
+  newTag: 1.0.0
+- name: greenmart/web
+  newName: registry.example.com/greenmart/web
+  newTag: 1.0.0

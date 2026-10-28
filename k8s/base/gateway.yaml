@@ -24,6 +24,9 @@ data:
         server {
             listen 80;
 
+            location = /gateway-health { access_log off; default_type text/plain; return 200 "ok
+    "; }
+
             location /static/ { alias /staticfiles/; }
             location /media/  { alias /media/; }
 
@@ -194,7 +197,8 @@ spec:
         - name: http
           containerPort: 80
         readinessProbe:
-          tcpSocket:
+          httpGet:
+            path: /gateway-health
             port: 80
           initialDelaySeconds: 3
           periodSeconds: 5

@@ -17,22 +17,26 @@ spec:
       restartPolicy: Never
       containers:
       - name: migrator
-        image: noobcoder1219/data-migrator:1.0.0
-        imagePullPolicy: IfNotPresent
+        image: greenmart/data-migrator
         command:
         - python
         - /scripts/migrate_sqlite_to_mysql.py
         - --sqlite
         - /legacy/db.sqlite3
         - --host
-        - mysql
+        - $(DB_HOST)
         - --user
-        - root
+        - $(MYSQL_USER)
         - --password
-        - $(MYSQL_ROOT_PASSWORD)
-        - --truncate
+        - $(MYSQL_PASSWORD)
+        - --dry-run
+        envFrom:
+        - configMapRef:
+            name: greenmart-config
         env:
-        - name: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_USER
+          value: root
+        - name: MYSQL_PASSWORD
           valueFrom:
             secretKeyRef:
               name: greenmart-secrets
