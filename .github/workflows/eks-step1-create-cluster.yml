@@ -41,7 +41,8 @@ jobs:
           region: ${{ inputs.aws_region }}
           cluster-name: ${{ inputs.cluster_name }}
           kubeconfig: "false"   # cluster chưa tồn tại, kubeconfig cập nhật ở step bên dưới
-      - name:Validate Nodegroup options:
+
+      - name: Validate Nodegroup options 
         shell: bash
         run: |
           if [[ -n "${{ inputs.manifest_path }}" && \
