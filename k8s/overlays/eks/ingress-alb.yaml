@@ -1,0 +1,29 @@
+# ALB (AWS Load Balancer Controller) -> Service gateway (ClusterIP) -> nginx gateway.
+# Chạy HTTP, không cần domain: truy cập bằng DNS của ALB. Cần đã cài controller (infra/eks-bootstrap/bootstrap.sh).
+# Muốn HTTPS sau này: thêm listen-ports + certificate-arn (ACM) + domain; xem README.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: greenmart-alb
+  labels:
+    app.kubernetes.io/name: ingress
+    app.kubernetes.io/part-of: greenmart
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /gateway-health
+    # Giới hạn nguồn truy cập khi test: thay bằng IP của bạn, ví dụ "203.0.113.10/32"
+    alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: 80

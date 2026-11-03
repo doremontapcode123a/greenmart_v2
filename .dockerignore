@@ -7,3 +7,5 @@ media
 legacy
 deploy
 tests
+infra
+k8s

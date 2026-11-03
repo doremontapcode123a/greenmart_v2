@@ -1,0 +1,43 @@
+eksctl create iamserviceaccount \
+    --cluster=devops-test-cluster \
+    --namespace=kube-system \
+    --name=aws-load-balancer-controller \
+    --attach-policy-arn=arn:aws:iam::410098332444:policy/AWSLoadBalancerControllerIAMPolicy \
+    --override-existing-serviceaccounts \
+    --region ap-southeast-1 \
+    --approve
+
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=devops-test-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --version 1.14.0
+
+  eksctl create fargateprofile \
+    --cluster devops-test-cluster \
+    --region ap-southeast-1 \
+    --name alb-sample-app \
+    --namespace game-2048
+
+
+images:
+  - name: greenmart/user-service
+    newName: docker.io/noobcoder1219/user-service
+    newTag: "1.0.0"
+
+  - name: greenmart/catalog-service
+    newName: docker.io/noobcoder1219/catalog-service
+    newTag: "1.0.0"
+
+  - name: greenmart/order-service
+    newName: docker.io/noobcoder1219/order-service
+    newTag: "1.0.0"
+
+  - name: greenmart/promotion-service
+    newName: docker.io/noobcoder1219/promotion-service
+    newTag: "1.0.0"
+
+  - name: greenmart/web
+    newName: docker.io/noobcoder1219/web
+    newTag: "1.0.0"

@@ -19,18 +19,22 @@ resources:
 - hpa.yaml
 - networkpolicy.yaml
 images:
-- name: greenmart/user-service
-  newName: registry.example.com/greenmart/user-service
-  newTag: 1.0.0
-- name: greenmart/catalog-service
-  newName: registry.example.com/greenmart/catalog-service
-  newTag: 1.0.0
-- name: greenmart/order-service
-  newName: registry.example.com/greenmart/order-service
-  newTag: 1.0.0
-- name: greenmart/promotion-service
-  newName: registry.example.com/greenmart/promotion-service
-  newTag: 1.0.0
-- name: greenmart/web
-  newName: registry.example.com/greenmart/web
-  newTag: 1.0.0
+  - name: greenmart/user-service
+    newName: docker.io/noobcoder1219/user-service
+    newTag: "1.0.0"
+
+  - name: greenmart/catalog-service
+    newName: docker.io/noobcoder1219/catalog-service
+    newTag: "1.0.0"
+
+  - name: greenmart/order-service
+    newName: docker.io/noobcoder1219/order-service
+    newTag: "1.0.0"
+
+  - name: greenmart/promotion-service
+    newName: docker.io/noobcoder1219/promotion-service
+    newTag: "1.0.0"
+
+  - name: greenmart/web
+    newName: docker.io/noobcoder1219/web
+    newTag: "1.0.0"

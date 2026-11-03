@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 /legacy/
+*.text
+README.md
+.env

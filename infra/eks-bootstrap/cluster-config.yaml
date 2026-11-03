@@ -1,0 +1,13 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: greenmart
+  region: ap-southeast-1
+iam:
+  withOIDC: true
+nodeGroups:
+  - name: my-nodes
+    instanceType: c7i-flex.large
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4

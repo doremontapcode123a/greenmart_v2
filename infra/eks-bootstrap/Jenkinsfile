@@ -1,0 +1,52 @@
+// Job Jenkins bootstrap cluster EKS mới: OIDC provider + AWS Load Balancer Controller + ứng dụng mẫu 2048.
+// Tạo Pipeline job trỏ vào file này (Script Path: infra/eks-bootstrap/Jenkinsfile).
+// Cần: agent Linux có sẵn `aws` CLI v2 (kubectl/eksctl/helm sẽ được script tự tải);
+//      credential kiểu "AWS Credentials" (plugin CloudBees AWS Credentials) có quyền như trong README.
+// Có thể gọi tự động sau job tạo cluster:  build job: 'eks-bootstrap', parameters: [string(name: 'CLUSTER_NAME', value: 'my-cluster')]
+pipeline {
+  agent any
+
+  options {
+    timeout(time: 45, unit: 'MINUTES')
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  parameters {
+    string(name: 'CLUSTER_NAME', defaultValue: '', description: 'Tên cluster EKS (bắt buộc)')
+    string(name: 'AWS_REGION', defaultValue: 'ap-southeast-1', description: 'AWS region')
+    string(name: 'AWS_CREDENTIALS_ID', defaultValue: 'aws-eks-bootstrap', description: 'ID credential AWS trong Jenkins')
+    choice(name: 'ACTION', choices: ['install', 'delete-sample'], description: 'install = cài; delete-sample = xóa app 2048 (và ALB)')
+    booleanParam(name: 'DEPLOY_SAMPLE', defaultValue: true, description: 'Deploy ứng dụng mẫu 2048')
+    choice(name: 'SAMPLE_SCHEME', choices: ['internet-facing', 'internal'], description: 'ALB của ứng dụng mẫu')
+    string(name: 'LBC_VERSION', defaultValue: 'v2.14.1', description: 'Bản AWS Load Balancer Controller (theo guide)')
+    string(name: 'LBC_CHART_VERSION', defaultValue: '1.14.0', description: 'Bản Helm chart (theo guide)')
+  }
+
+  environment {
+    INSTALL_TOOLS = 'true'   // Jenkins đưa mọi parameter vào biến môi trường, bootstrap.sh đọc trực tiếp
+  }
+
+  stages {
+    stage('Kiểm tra tham số') {
+      steps {
+        script {
+          if (!params.CLUSTER_NAME?.trim()) {
+            error('Cần nhập CLUSTER_NAME')
+          }
+        }
+      }
+    }
+
+    stage('Bootstrap EKS') {
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                          credentialsId: params.AWS_CREDENTIALS_ID,
+                          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+          sh 'bash infra/eks-bootstrap/bootstrap.sh'
+        }
+      }
+    }
+  }
+}

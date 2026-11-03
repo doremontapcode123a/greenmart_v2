@@ -40,11 +40,16 @@ docker compose up -d --build
 #   http://localhost:8088/admin/         (Django admin: user)   /admin/catalog/ (Django admin: catalog)
 ```
 
+### Kubernetes
+
+Manifest Kustomize nằm trong `k8s/` – xem `k8s/README.md` (build image, tạo Secret, apply, migrate, chuyển dữ liệu).
+Amazon EKS (RDS + EBS + ECR, chạy HTTP): hạ tầng bằng Terraform ở `infra/terraform/`, overlay `k8s/overlays/eks/`, runbook ở `k8s/overlays/eks/README.md`.
+Cluster EKS mới tạo: `infra/eks-bootstrap/` tự cài OIDC provider + AWS Load Balancer Controller + app mẫu 2048 (Jenkinsfile / GitHub Actions / script).
+
 ### Chuyển dữ liệu từ `db.sqlite3` cũ
 
 ```bash
 mkdir -p legacy && cp /đường/dẫn/db.sqlite3 legacy/
-mkdir -p legacy && cp C:/project/greenmart/db.sqlite3 legacy/
 docker compose up -d                                   # để các service tự migrate tạo bảng
 docker compose --profile tools run --rm data-migrator --dry-run     # chỉ thống kê
 docker compose --profile tools run --rm data-migrator --truncate    # nạp thật (ghi đè dữ liệu đích)
@@ -87,6 +92,7 @@ reset mật khẩu → admin: thêm/sửa/ẩn sản phẩm có ảnh, khuyến 
 
 ## Chưa làm / chưa kiểm chứng
 - **Chưa build thử Docker image / `docker compose up`** (môi trường tạo ra không có Docker). Đã kiểm chứng: toàn bộ 5 service chạy bằng gunicorn trên MariaDB 10.11, migrate sạch, script chuyển dữ liệu chạy với dữ liệu thật, bộ test e2e đạt toàn bộ, `collectstatic` OK, cú pháp compose/shell hợp lệ. Production dùng MySQL 8 – khuyến nghị chạy e2e một lần sau khi `compose up`.
+- **Manifest K8s** đã validate schema nhưng chưa chạy trên cluster thật.
 - **CI/CD (Jenkins, GitHub Actions, ECS) chưa chuyển đổi** – xem `deploy/legacy-monolith/README.md`.
 - Chưa có giới hạn số lần đăng nhập sai, chưa có cache/phân trang cho danh sách sản phẩm (như bản cũ).
 - Nếu service phụ thuộc chết, web hiển thị trang 503 thân thiện; chưa có circuit breaker/retry nâng cao (chỉ retry GET 2 lần).

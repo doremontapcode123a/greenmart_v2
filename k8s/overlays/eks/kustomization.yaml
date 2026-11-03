@@ -1,22 +1,22 @@
-# Overlay EKS: ALB (TLS bằng ACM) + EFS cho ảnh sản phẩm + RDS MySQL thay cho MySQL container.
-# Triển khai:  kubectl apply -k k8s/overlays/eks
-# TÌM VÀ ĐỔI mọi giá trị đánh dấu "ĐỔI" (account id, domain, RDS endpoint, ACM ARN, EFS id ở storageclass-efs.yaml).
+# Overlay EKS: RDS MySQL (tạo bằng Terraform: infra/terraform) + EBS gp3 cho ảnh sản phẩm + ALB HTTP.
+# CHƯA có: Route 53, TLS/ACM. Cần AWS Load Balancer Controller (infra/eks-bootstrap).  Triển khai:  kubectl apply -k k8s/overlays/eks
+# Đổi các giá trị đánh dấu "ĐỔI" (account id ECR, RDS endpoint). Sau khi có DNS của load balancer: xem README.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: greenmart
 
 resources:
   - ../../base
-  - storageclass-efs.yaml
-  - rds-init-job.yaml
+  - storageclass-ebs.yaml
+  - ingress-alb.yaml
 
 # Image ECR (ĐỔI account id/region/tag). Khớp theo tên image sau khi base đã áp dụng `images:`.
 images:
-  - { name: registry.example.com/greenmart/user-service,      newName: 111122223333.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/user-service,      newTag: 1.0.0 }
-  - { name: registry.example.com/greenmart/catalog-service,   newName: 111122223333.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/catalog-service,   newTag: 1.0.0 }
-  - { name: registry.example.com/greenmart/order-service,     newName: 111122223333.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/order-service,     newTag: 1.0.0 }
-  - { name: registry.example.com/greenmart/promotion-service, newName: 111122223333.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/promotion-service, newTag: 1.0.0 }
-  - { name: registry.example.com/greenmart/web,               newName: 111122223333.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/web,               newTag: 1.0.0 }
+  - { name:  docker.io/noobcoder1219/user-service,      newName: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/user-service,      newTag: 1.0.0 }
+  - { name: docker.io/noobcoder1219/catalog-service,    newName: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/catalog-service,   newTag: 1.0.1 }
+  - { name: docker.io/noobcoder1219/order-service,      newName: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/order-service,     newTag: 1.0.0 }
+  - { name: docker.io/noobcoder1219/promotion-service,  newName: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/promotion-service, newTag: 1.0.0 }
+  - { name: docker.io/noobcoder1219/web,                newName: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/web,               newTag: 1.0.0 }
 
 patches:
   # --- Dùng RDS: bỏ MySQL container ---
@@ -41,51 +41,60 @@ patches:
       kind: NetworkPolicy
       metadata: { name: allow-db-clients-to-mysql }
 
-  # --- ConfigMap: RDS + domain ---
+  # --- ConfigMap: RDS endpoint + chạy HTTP (chưa có domain/TLS) ---
   - patch: |-
       apiVersion: v1
       kind: ConfigMap
       metadata: { name: greenmart-config }
       data:
-        DB_HOST: greenmart.abcdefghijkl.ap-southeast-1.rds.amazonaws.com   # ĐỔI: RDS endpoint
-        PUBLIC_HOST: shop.example.com                                       # ĐỔI: domain
-        PUBLIC_SCHEME: https
-        CSRF_TRUSTED_ORIGINS: https://shop.example.com                      # ĐỔI
-        WEB_ALLOWED_HOSTS: shop.example.com,localhost                       # ĐỔI
+        DB_HOST: greenmart-mysql.c78uwqck0isg.ap-southeast-1.rds.amazonaws.com   # ĐỔI: output rds_address của Terraform
+        PUBLIC_SCHEME: http
+        PUBLIC_HOST: k8s-greenmar-greenmar-8cc3475723-52143455.ap-southeast-1.elb.amazonaws.com            # ĐỔI sau khi có DNS của LoadBalancer (dùng cho link trong email đặt lại mật khẩu)
+        CSRF_TRUSTED_ORIGINS: http://k8s-greenmar-greenmar-8cc3475723-52143455.ap-southeast-1.elb.amazonaws.com   # ĐỔI cùng lúc: http://<DNS của LoadBalancer>
+        WEB_ALLOWED_HOSTS: "*"            # chưa có domain cố định; siết lại khi có domain
 
-  # --- Ảnh sản phẩm trên EFS (RWX) ---
+  # --- Ảnh sản phẩm trên EBS (ReadWriteOnce): catalog-service chạy 1 replica, cập nhật kiểu Recreate ---
   - target: { kind: PersistentVolumeClaim, name: greenmart-media }
     patch: |-
+      - op: replace
+        path: /spec/accessModes
+        value: [ReadWriteOnce]
       - op: add
         path: /spec/storageClassName
-        value: efs-sc
-
-  # --- Ingress -> AWS Load Balancer Controller (ALB). TLS kết thúc tại ALB bằng ACM ---
-  - target: { kind: Ingress, name: greenmart }
+        value: ebs-gp3
+  - target: { kind: Deployment, name: catalog-service }
     patch: |-
       - op: replace
-        path: /spec/ingressClassName
-        value: alb
-      - op: remove
-        path: /spec/tls
+        path: /spec/replicas
+        value: 1
       - op: replace
-        path: /spec/rules/0/host
-        value: shop.example.com                                             # ĐỔI
-      - op: replace
-        path: /metadata/annotations
-        value:
-          alb.ingress.kubernetes.io/scheme: internet-facing
-          alb.ingress.kubernetes.io/target-type: ip
-          alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-          alb.ingress.kubernetes.io/ssl-redirect: "443"
-          alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-southeast-1:111122223333:certificate/00000000-0000-0000-0000-000000000000   # ĐỔI: ACM ARN
-          alb.ingress.kubernetes.io/healthcheck-path: /gateway-health
-          alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+        path: /spec/strategy
+        value: { type: Recreate }
+  - patch: |-
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata: { name: catalog-service }
 
-  # --- NetworkPolicy: ALB (target-type ip) gọi thẳng vào pod gateway từ IP trong VPC, không phải từ namespace ingress ---
+  # --- Gateway: không mount volume ảnh, proxy /media/ về catalog; mở ra Internet qua ALB (Ingress, HTTP) ---
+  - path: gateway-nginx-patch.yaml
+  - target: { kind: Deployment, name: gateway }
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/volumes/2
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts/3
+  # Service gateway giữ ClusterIP; ALB do Ingress `greenmart-alb` tạo (ingress-alb.yaml). Bỏ Ingress nginx của base.
+  - patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata: { name: greenmart }
+
+  # --- NetworkPolicy: traffic từ load balancer không đến từ namespace ingress ---
   - target: { kind: NetworkPolicy, name: allow-ingress-controller-to-gateway }
     patch: |-
       - op: replace
         path: /spec/ingress/0/from
         value:
-          - ipBlock: { cidr: 0.0.0.0/0 }      # nên siết lại thành CIDR VPC của bạn
+          - ipBlock: { cidr: 0.0.0.0/0 }

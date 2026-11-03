@@ -1,4 +1,4 @@
-# GreenMart – kiến trúc microservice.  Chạy:  cp .env.example .env  (điền giá trị)  &&  docker compose up -d --build
+# GreenMart – kiến trúc microservice.  Chạy:  cd infra/terraform-local && terraform init && terraform apply  (tự sinh .env + tạo 5 DB)  →  docker compose up -d --build
 # Chỉ có `gateway` publish port ra ngoài; các service và MySQL chỉ nằm trong mạng nội bộ.
 
 x-internal: &internal
@@ -24,17 +24,12 @@ x-healthcheck: &py-health
 services:
   mysql:
     image: mysql:8.0
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    # DB + user được Terraform tạo (infra/terraform-local); user mới dùng mysql_native_password như script init cũ.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--authentication-policy=mysql_native_password"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?cần đặt MYSQL_ROOT_PASSWORD trong .env}
-      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?}
-      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?}
-      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?}
-      PROMOTION_DB_PASSWORD: ${PROMOTION_DB_PASSWORD:?}
-      WEB_DB_PASSWORD: ${WEB_DB_PASSWORD:?}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s

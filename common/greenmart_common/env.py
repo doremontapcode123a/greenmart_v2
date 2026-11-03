@@ -3,7 +3,9 @@ import os
 
 
 def env(name, default=None, required=False):
-    value = os.environ.get(name, default)
+    value = os.environ.get(name)
+    if value is None or value == "":  # biến đặt nhưng rỗng (vd. `FOO=` trong compose/configmap) coi như chưa đặt
+        value = default
     if required and (value is None or value == ""):
         raise RuntimeError(f"Thiếu biến môi trường bắt buộc: {name}")
     return value
@@ -11,7 +13,7 @@ def env(name, default=None, required=False):
 
 def env_bool(name, default=False):
     value = os.environ.get(name)
-    if value is None:
+    if value is None or value == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 

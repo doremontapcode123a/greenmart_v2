@@ -1,7 +1,7 @@
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 from greenmart_common.health import make_health_view
 
@@ -10,5 +10,6 @@ urlpatterns = [
     path("admin/catalog/", admin.site.urls),
     path("api/", include("catalog.urls")),
 ]
-# Chỉ để tiện khi chạy dev không qua gateway; ở môi trường compose nginx phục vụ /media/.
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Phục vụ ảnh sản phẩm. Docker Compose: nginx đọc thẳng volume nên không chạm tới route này;
+# Kubernetes không có EFS: gateway proxy /media/ về đây (lưu lượng ảnh nhỏ, đủ dùng cho quy mô hiện tại).
+urlpatterns += [re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT})]

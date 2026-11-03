@@ -1,0 +1,53 @@
+# Bootstrap cluster EKS mới: OIDC provider + AWS Load Balancer Controller + ứng dụng mẫu 2048.
+# Chạy tay (Actions > EKS bootstrap > Run workflow) hoặc gọi từ workflow tạo cluster bằng `workflow_call`.
+# Cần secret AWS_ROLE_TO_ASSUME: IAM role tin cậy GitHub OIDC, đủ quyền (xem infra/eks-bootstrap/README.md)
+# và đã là admin của cluster (người tạo cluster, hoặc EKS access entry).
+name: EKS bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:  { description: "Tên cluster EKS", required: true, type: string }
+      aws_region:    { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      action:        { description: "install = cài; delete-sample = xóa app 2048 (và ALB)", required: false, default: "install", type: choice, options: [install, delete-sample] }
+      deploy_sample: { description: "Deploy ứng dụng mẫu 2048", required: false, default: true, type: boolean }
+      sample_scheme: { description: "ALB của ứng dụng mẫu", required: false, default: "internet-facing", type: choice, options: [internet-facing, internal] }
+  workflow_call:
+    inputs:
+      cluster_name:  { required: true, type: string }
+      aws_region:    { required: false, default: "ap-southeast-1", type: string }
+      action:        { required: false, default: "install", type: string }
+      deploy_sample: { required: false, default: true, type: boolean }
+      sample_scheme: { required: false, default: "internet-facing", type: string }
+    secrets:
+      AWS_ROLE_TO_ASSUME: { required: true }
+
+permissions:
+  id-token: write   # để assume role bằng OIDC
+  contents: read
+
+concurrency:
+  group: eks-bootstrap-${{ inputs.cluster_name }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Bootstrap EKS (OIDC + ALB controller + 2048)
+        env:
+          CLUSTER_NAME: ${{ inputs.cluster_name }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          ACTION: ${{ inputs.action }}
+          DEPLOY_SAMPLE: ${{ inputs.deploy_sample }}
+          SAMPLE_SCHEME: ${{ inputs.sample_scheme }}
+          INSTALL_TOOLS: "true"   # runner đã có aws/kubectl/helm; script tự tải eksctl nếu thiếu
+        run: bash infra/eks-bootstrap/bootstrap.sh

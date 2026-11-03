@@ -1,0 +1,33 @@
+# Không có volume dùng chung (EBS chỉ gắn được 1 pod/lần) => gateway không đọc ảnh trực tiếp
+# mà proxy /media/ về catalog-service (service này sở hữu volume EBS và tự phục vụ ảnh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-nginx
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+        include       /etc/nginx/mime.types;
+        client_max_body_size 10m;
+
+        map $http_x_forwarded_proto $fwd_proto { default $http_x_forwarded_proto; "" $scheme; }
+
+        upstream web             { server web:8000; }
+        upstream user_service    { server user-service:8000; }
+        upstream catalog_service { server catalog-service:8000; }
+
+        server {
+            listen 80;
+
+            location = /gateway-health { access_log off; default_type text/plain; return 200 "ok\n"; }
+
+            location /static/ { alias /staticfiles/; }
+            location /media/  { proxy_pass http://catalog_service; include /etc/nginx/proxy_params; }
+
+            location /admin/catalog/ { proxy_pass http://catalog_service; include /etc/nginx/proxy_params; }
+            location /admin/         { proxy_pass http://user_service;    include /etc/nginx/proxy_params; }
+            location /               { proxy_pass http://web;             include /etc/nginx/proxy_params; }
+        }
+    }
