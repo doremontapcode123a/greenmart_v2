@@ -1,0 +1,81 @@
+# ### cho ảnh sản phẩm cũ vào volume EBS và tạo tk admin cho csdl ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 6 - Ảnh sản phẩm và tài khoản admin"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+
+jobs:
+  # ===========================================================================
+  # ### cho ảnh sản phẩm cũ vào volume EBS và tạo tk admin cho csdl ###
+  # ===========================================================================
+  media-and-admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LC_ALL: C.UTF-8   # giữ đúng tên file tiếng Việt khi copy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      # POD=$(kubectl -n greenmart get pod -l app.kubernetes.io/name=catalog-service -o name | head -1)
+      - name: Lấy pod catalog-service
+        run: |
+          POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=catalog-service --field-selector=status.phase=Running -o name | head -1)
+          [ -n "$POD" ] || { echo "Không có pod catalog-service đang chạy"; exit 1; }
+          echo "POD=${POD#pod/}" >> "$GITHUB_ENV"
+
+      # copy media/products vào /media/products (dùng tar: không tạo thư mục lồng products/products, giữ tên file UTF-8)
+      # (Trên runner Linux không gặp lỗi đường dẫn của Git Bash nên không cần MSYS_NO_PATHCONV=1)
+      - name: Copy ảnh sản phẩm vào volume EBS
+        run: |
+          kubectl -n "$NS" exec "$POD" -- mkdir -p /media/products
+          tar -C media/products -cf - . | kubectl -n "$NS" exec -i "$POD" -- tar -xf - -C /media/products
+          kubectl -n "$NS" exec "$POD" -- ls -la /media/products
+
+      # kubectl exec ... createsuperuser (không tương tác: thông tin lấy từ secret/variable của repo)
+      - name: Tạo superuser cho user-service
+        env:
+          DJANGO_SUPERUSER_USERNAME: ${{ vars.DJANGO_SUPERUSER_USERNAME || 'admin' }}
+          DJANGO_SUPERUSER_EMAIL: ${{ vars.DJANGO_SUPERUSER_EMAIL || 'admin@example.com' }}
+          DJANGO_SUPERUSER_PASSWORD: ${{ secrets.DJANGO_SUPERUSER_PASSWORD }}
+        run: |
+          : "${DJANGO_SUPERUSER_PASSWORD:?Cần đặt secret DJANGO_SUPERUSER_PASSWORD}"
+          kubectl -n "$NS" exec deploy/user-service -- env \
+            DJANGO_SUPERUSER_USERNAME="$DJANGO_SUPERUSER_USERNAME" DJANGO_SUPERUSER_EMAIL="$DJANGO_SUPERUSER_EMAIL" \
+            DJANGO_SUPERUSER_PASSWORD="$DJANGO_SUPERUSER_PASSWORD" \
+            python manage.py createsuperuser --noinput || echo "Superuser đã tồn tại (bỏ qua)."
+
+      - name: Tạo superuser cho catalog-service
+        env:
+          DJANGO_SUPERUSER_USERNAME: ${{ vars.DJANGO_SUPERUSER_USERNAME || 'admin' }}
+          DJANGO_SUPERUSER_EMAIL: ${{ vars.DJANGO_SUPERUSER_EMAIL || 'admin@example.com' }}
+          DJANGO_SUPERUSER_PASSWORD: ${{ secrets.DJANGO_SUPERUSER_PASSWORD }}
+        run: |
+          : "${DJANGO_SUPERUSER_PASSWORD:?Cần đặt secret DJANGO_SUPERUSER_PASSWORD}"
+          kubectl -n "$NS" exec deploy/catalog-service -- env \
+            DJANGO_SUPERUSER_USERNAME="$DJANGO_SUPERUSER_USERNAME" DJANGO_SUPERUSER_EMAIL="$DJANGO_SUPERUSER_EMAIL" \
+            DJANGO_SUPERUSER_PASSWORD="$DJANGO_SUPERUSER_PASSWORD" \
+            python manage.py createsuperuser --noinput || echo "Superuser đã tồn tại (bỏ qua)."

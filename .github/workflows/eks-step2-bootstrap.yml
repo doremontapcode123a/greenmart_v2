@@ -1,0 +1,56 @@
+# ### sau đó dùng bootstrap.sh để cấu hình ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 2 - Bootstrap"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+
+jobs:
+  # ===========================================================================
+  # ### sau đó dùng bootstrap.sh để cấu hình ###
+  # ===========================================================================
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      # bootstrap.sh là một script, tự chạy lần lượt 3 việc dưới đây trong một lần gọi:
+      #   - Cài OIDC cho cluster                 (enable-iam-roles-for-service-accounts)
+      #   - Cài plugin ALB Ingress Controller    (lbc-helm)
+      #   - Apply ứng dụng sample (2048 game)    (alb-ingress.html#application-load-balancer-sample-application)
+      - name: Cài OIDC + ALB Ingress Controller + apply sample 2048
+        env:
+          INSTALL_TOOLS: "true"
+          DEPLOY_SAMPLE: "true"
+        run: bash infra/eks-bootstrap/bootstrap.sh
+
+      # Sau khi test thành công, xóa sample (và ALB của nó): kubectl delete -f 2048_full.yaml --ignore-not-found
+      - name: Xóa sample 2048
+        env:
+          ACTION: delete-sample
+          INSTALL_TOOLS: "true"
+        run: bash infra/eks-bootstrap/bootstrap.sh

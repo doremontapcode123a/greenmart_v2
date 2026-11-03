@@ -1,0 +1,120 @@
+# ### Sau khi deploy thành công web -> migrate data từ sqlite3 của app cũ sang ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 7 - Migrate dữ liệu SQLite cũ"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.0.0", type: string }
+      migrate_dry_run: { description: "Chỉ chạy thử (--dry-run), chưa ghi dữ liệu", required: false, default: true, type: boolean }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.0.0", type: string }
+      migrate_dry_run: { description: "Chỉ chạy thử (--dry-run), chưa ghi dữ liệu", required: false, default: true, type: boolean }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+  TAG: ${{ inputs.image_tag }}
+
+jobs:
+  # ===========================================================================
+  # ### Sau khi deploy thành công web -> migrate data từ sqlite3 của app cũ sang ###
+  # ===========================================================================
+  migrate-legacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      # db.sqlite3 không nằm trong git: lấy từ legacy/db.sqlite3 (nếu bạn đưa vào repo riêng tư) hoặc từ S3 (vars.LEGACY_DB_S3_URI)
+      - name: Chuẩn bị file db.sqlite3
+        env:
+          LEGACY_DB_S3_URI: ${{ vars.LEGACY_DB_S3_URI }}
+        run: |
+          mkdir -p legacy
+          if [ -n "${LEGACY_DB_S3_URI:-}" ]; then aws s3 cp "$LEGACY_DB_S3_URI" legacy/db.sqlite3; fi
+          [ -s legacy/db.sqlite3 ] || { echo "Thiếu legacy/db.sqlite3. Đặt repository variable LEGACY_DB_S3_URI (s3://bucket/db.sqlite3) hoặc thêm file vào legacy/."; exit 1; }
+          ls -la legacy
+
+      # tạo PVC cho legacy data (SQLite) + pod upload dữ liệu vào PVC
+      - name: Tạo PVC greenmart-legacy-data và pod legacy-uploader
+        run: |
+          kubectl -n "$NS" apply -f - <<'EOF'
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: greenmart-legacy-data
+          spec:
+            storageClassName: ebs-gp3
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 1Gi
+          ---
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: legacy-uploader
+          spec:
+            automountServiceAccountToken: false
+            containers:
+              - name: sh
+                image: busybox:1.36
+                command: ["sleep", "3600"]
+                volumeMounts:
+                  - { name: legacy, mountPath: /legacy }
+            volumes:
+              - name: legacy
+                persistentVolumeClaim:
+                  claimName: greenmart-legacy-data
+          EOF
+          kubectl -n "$NS" wait --for=condition=Ready pod/legacy-uploader --timeout=300s
+
+      # copy db.sqlite3 vào legacy-uploader
+      - name: Copy db.sqlite3 vào legacy-uploader
+        run: kubectl -n "$NS" cp ./legacy/db.sqlite3 legacy-uploader:/legacy/db.sqlite3
+
+      # kiểm tra trong legacy-uploader đã có db.sqlite3 chưa
+      - name: Kiểm tra db.sqlite3 trong legacy-uploader
+        run: kubectl -n "$NS" exec legacy-uploader -- ls -la /legacy
+
+      # giải phóng volume trước khi Job data-migrator gắn vào (PVC được giữ lại)
+      - name: Xóa pod legacy-uploader
+        run: kubectl -n "$NS" delete pod legacy-uploader --ignore-not-found
+
+      # apply job data-migrator (image ECR, user RDS là admin, bỏ --dry-run nếu migrate_dry_run=false)
+      - name: Apply job data-migrator
+        run: |
+          F=k8s/jobs/data-migrator.yaml
+          sed -i "s#image: greenmart/data-migrator#image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/greenmart/data-migrator:${TAG}#" "$F"
+          sed -i '/name: MYSQL_USER/{n;s/value: root/value: admin/}' "$F"
+          if [ "${{ inputs.migrate_dry_run }}" != "true" ]; then sed -i '/^        - --dry-run$/d' "$F"; fi
+          grep -nE "image:|value: admin|dry-run" "$F" || true
+          kubectl -n "$NS" delete job data-migrator --ignore-not-found
+          kubectl -n "$NS" apply -f "$F"
+
+      # kiểm tra log (kubectl logs job/data-migrator)
+      - name: Kiểm tra log data-migrator
+        run: |
+          kubectl -n "$NS" wait --for=condition=complete job/data-migrator --timeout=600s || {
+            kubectl -n "$NS" logs job/data-migrator || true
+            exit 1
+          }
+          kubectl -n "$NS" logs job/data-migrator

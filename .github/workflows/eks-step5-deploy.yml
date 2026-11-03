@@ -1,0 +1,99 @@
+# ### Deploy lên eks bằng các file trong overlay ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 5 - Deploy bằng overlay"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.0.0", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.0.0", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+  TAG: ${{ inputs.image_tag }}
+
+jobs:
+  # ===========================================================================
+  # ### Deploy lên eks bằng các file trong overlay ###
+  # ===========================================================================
+  deploy-eks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      # Thay account id, tag image và DB_HOST (rds_address) trong overlay. Sửa trên runner, không commit.
+      - name: Điền ACCOUNT_ID, TAG và DB_HOST vào kustomization.yaml
+        run: |
+          RDS_ADDRESS=$(aws rds describe-db-instances --db-instance-identifier greenmart-mysql --region "$AWS_REGION" \
+                          --query 'DBInstances[0].Endpoint.Address' --output text)
+          [ -n "$RDS_ADDRESS" ] && [ "$RDS_ADDRESS" != "None" ] || { echo "Không tìm thấy RDS greenmart-mysql"; exit 1; }
+          F=k8s/overlays/eks/kustomization.yaml
+          sed -i "s/111122223333/${ACCOUNT_ID}/g; s/newTag: [0-9A-Za-z._-]*/newTag: ${TAG}/g; s/DB_HOST: [^ ]*/DB_HOST: ${RDS_ADDRESS}/" "$F"
+          grep -nE "newName|newTag|DB_HOST" "$F"
+
+      # sử dụng lệnh kubectl apply -k k8s/overlays/eks
+      - name: kubectl apply -k k8s/overlays/eks
+        run: kubectl apply -k k8s/overlays/eks
+
+      # đợi các job migrate hoàn tất
+      - name: Đợi Job migrate hoàn tất
+        run: kubectl -n "$NS" wait --for=condition=complete job -l app.kubernetes.io/component=migrate --timeout=300s
+
+      # xem trạng thái rollout của web và gateway
+      - name: Đợi rollout web và gateway
+        run: kubectl -n "$NS" rollout status deploy/web deploy/gateway --timeout=300s
+
+      # đợi ALB lên (kubectl get ingress greenmart-alb -w) và lấy address
+      - name: Đợi ALB có địa chỉ
+        id: alb
+        run: |
+          for i in $(seq 1 60); do
+            ADDR=$(kubectl -n "$NS" get ingress greenmart-alb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            [ -n "$ADDR" ] && break
+            echo "Chờ ALB... ($i/60)"; sleep 10
+          done
+          [ -n "$ADDR" ] || { echo "ALB chưa có địa chỉ sau 10 phút"; kubectl -n "$NS" describe ingress greenmart-alb; exit 1; }
+          echo "ALB: $ADDR"
+          echo "address=$ADDR" >> "$GITHUB_OUTPUT"
+          echo "ALB: http://$ADDR" >> "$GITHUB_STEP_SUMMARY"
+
+      # thay address của ALB vào PUBLIC_HOST và CSRF_TRUSTED_ORIGINS
+      - name: Điền địa chỉ ALB vào PUBLIC_HOST và CSRF_TRUSTED_ORIGINS
+        run: |
+          F=k8s/overlays/eks/kustomization.yaml
+          ADDR='${{ steps.alb.outputs.address }}'
+          sed -i "s#PUBLIC_HOST: [^ ]*#PUBLIC_HOST: ${ADDR}#; s#CSRF_TRUSTED_ORIGINS: [^ ]*#CSRF_TRUSTED_ORIGINS: http://${ADDR}#" "$F"
+          grep -nE "PUBLIC_HOST|CSRF_TRUSTED_ORIGINS" "$F"
+
+      # apply lại overlay mới
+      - name: kubectl apply -k lần 2
+        run: kubectl apply -k k8s/overlays/eks
+
+      # rollout để user-service và web nhận cấu hình mới
+      - name: Rollout restart user-service và web
+        run: |
+          kubectl -n "$NS" rollout restart deploy/user-service deploy/web
+          kubectl -n "$NS" rollout status deploy/user-service deploy/web --timeout=300s
+
+      - name: Kiểm tra gateway-health
+        run: curl -fsS --retry 10 --retry-delay 15 --retry-all-errors "http://${{ steps.alb.outputs.address }}/gateway-health"

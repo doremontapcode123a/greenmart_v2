@@ -1,0 +1,87 @@
+# ### luồng build tạo eks bằng cluster-config.yaml ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 1 - Tạo cluster"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      quick_nodegroup: { description: "[Optional] Tạo thêm nodegroup nhanh (không cần manifest)", required: false, default: false, type: boolean }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      quick_nodegroup: { description: "[Optional] Tạo thêm nodegroup nhanh (không cần manifest)", required: false, default: false, type: boolean }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+
+jobs:
+  # ===========================================================================
+  # ### luồng build tạo eks bằng cluster-config.yaml ###
+  # ===========================================================================
+  create-eks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+          kubeconfig: "false"   # cluster chưa tồn tại, kubeconfig cập nhật ở step bên dưới
+
+      - name: Cài eksctl
+        run: |
+          curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin/eksctl
+          eksctl version
+
+      - name: Tạo cluster từ cluster-config.yaml (bỏ qua nếu đã có)
+        run: |
+          if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Cluster $CLUSTER_NAME đã tồn tại, bỏ qua bước tạo."
+          else
+            cp infra/eks/cluster-config.yaml /tmp/cluster-config.yaml
+            sed -i "s/^  name: .*/  name: ${CLUSTER_NAME}/; s/^  region: .*/  region: ${AWS_REGION}/" /tmp/cluster-config.yaml
+            eksctl create cluster -f /tmp/cluster-config.yaml
+          fi
+
+      # Chạy lệnh sau để disable extended support cho EKS (giúp tiết kiệm chi phí)
+      - name: Tắt extended support cho EKS
+        run: |
+          aws eks update-cluster-config --name "$CLUSTER_NAME" --region "$AWS_REGION" --upgrade-policy supportType=STANDARD \
+            || echo "Cluster đã ở supportType=STANDARD hoặc đang được cập nhật."
+
+      # Chạy lệnh sau để update file config trong ~/.kube/config
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
+      # Check context
+      - name: Check context
+        run: kubectl config get-contexts
+
+      # [Optional] Set context nếu có nhiều cluster và current context chưa đúng
+      - name: Set context
+        run: kubectl config use-context "arn:aws:eks:${AWS_REGION}:${ACCOUNT_ID}:cluster/${CLUSTER_NAME}"
+
+      # Get cluster info
+      - name: Get cluster info
+        run: kubectl cluster-info
+
+      # LƯU Ý: có thể tạo nodegroup nhanh mà không cần file manifest
+      - name: "[Optional] Tạo nodegroup nhanh"
+        if: ${{ inputs.quick_nodegroup }}
+        run: |
+          eksctl create nodegroup --cluster="$CLUSTER_NAME" --region="$AWS_REGION" --name=my-node-group \
+            --node-type=t3.medium --nodes=2 --nodes-min=2 --nodes-max=2 --managed

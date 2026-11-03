@@ -1,0 +1,103 @@
+# ### sau đó dùng terraform build rds và ebs ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 3 - Terraform RDS và EBS"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      db_instance_class: { description: "Loại instance RDS (gói Free: db.t4g.micro)", required: false, default: "db.t4g.micro", type: string }
+      db_backup_retention_days: { description: "Số ngày giữ backup RDS (gói Free: 1)", required: false, default: "1", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      db_instance_class: { description: "Loại instance RDS (gói Free: db.t4g.micro)", required: false, default: "db.t4g.micro", type: string }
+      db_backup_retention_days: { description: "Số ngày giữ backup RDS (gói Free: 1)", required: false, default: "1", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+
+jobs:
+  # ===========================================================================
+  # ### sau đó dùng terraform build rds và ebs ###
+  # ===========================================================================
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.10"
+          terraform_wrapper: false
+
+      # Runner bị xóa sau mỗi lần chạy nên state phải nằm ở S3 (khóa bằng use_lockfile, cần Terraform >= 1.10)
+      - name: Cấu hình backend S3 cho state
+        run: |
+          : "${TF_STATE_BUCKET:?Cần đặt repository variable TF_STATE_BUCKET}"
+          cat > backend.tf <<EOT
+          terraform {
+            backend "s3" {
+              bucket       = "${TF_STATE_BUCKET}"
+              key          = "greenmart/${CLUSTER_NAME}/terraform.tfstate"
+              region       = "${AWS_REGION}"
+              encrypt      = true
+              use_lockfile = true
+            }
+          }
+          EOT
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+
+      # cd vào thư mục terraform, chỉnh các biến trong file .tfvars cho phù hợp
+      - name: Tạo terraform.tfvars
+        run: |
+          cat > terraform.tfvars <<EOT
+          region                   = "${AWS_REGION}"
+          cluster_name             = "${CLUSTER_NAME}"
+          db_instance_class        = "${{ inputs.db_instance_class }}"
+          db_backup_retention_days = ${{ inputs.db_backup_retention_days }}
+          db_multi_az              = false
+          db_deletion_protection   = false
+          db_skip_final_snapshot   = true
+          install_ebs_csi_addon    = true
+          EOT
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: terraform apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      # terraform output next_steps để lấy master (rds_master_secret_arn) và DB_HOST (rds_address)
+      - name: terraform output next_steps
+        run: |
+          terraform output next_steps
+          {
+            echo "### Terraform outputs"
+            echo "- rds_address: \`$(terraform output -raw rds_address)\`"
+            echo "- rds_master_secret_arn: \`$(terraform output -raw rds_master_secret_arn)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Việc "lấy rds_address thay vào DB_HOST" được làm tự động ở job deploy-eks.

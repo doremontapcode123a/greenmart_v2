@@ -1,0 +1,51 @@
+# ### push image build ở local lên ECR ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
+name: "EKS 4 - Push image lên ECR"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.0.0", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.0.0", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+  TAG: ${{ inputs.image_tag }}
+
+jobs:
+  # ===========================================================================
+  # ### push image build ở local lên ECR ###
+  # ===========================================================================
+  push-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+          kubeconfig: "false"
+
+      # push-images.sh tự tạo repository ECR nếu chưa có, build và push 6 image (kể cả data-migrator)
+      - name: Push image lên ECR
+        run: bash k8s/overlays/eks/push-images.sh
+        env:
+          ACCOUNT_ID: ${{ env.ACCOUNT_ID }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          TAG: ${{ inputs.image_tag }}

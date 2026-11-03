@@ -1,6 +1,8 @@
-# Triển khai GreenMart lên EKS, chuyển từ note "luồng build" thành workflow.
-# Mỗi "###" trong note = 1 job; mỗi "#" = 1 step trong job đó.
-# Chạy: Actions > Deploy EKS > Run workflow. Chọn giai đoạn chạy bằng input `stages` (để chạy lại từng phần), ví dụ: deploy,media.
+# Triển khai GreenMart lên EKS = tập hợp 7 giai đoạn (mỗi "###" trong note là một workflow con).
+# Mỗi workflow con chứa các step ("#") của giai đoạn đó, và cũng chạy riêng được bằng Run workflow:
+#   1 eks-step1-create-cluster.yml   2 eks-step2-bootstrap.yml        3 eks-step3-terraform.yml
+#   4 eks-step4-push-images.yml      5 eks-step5-deploy.yml           6 eks-step6-media-admin.yml
+#   7 eks-step7-migrate-legacy.yml   (chỉ chạy khi bật migrate_legacy)
 #
 # Cần trước:
 #   secrets.AWS_ROLE_TO_ASSUME        IAM role tin cậy GitHub OIDC, đủ quyền EKS/EC2/IAM/RDS/ECR/CloudFormation/ELB/S3
@@ -12,13 +14,13 @@ name: Deploy EKS
 on:
   workflow_dispatch:
     inputs:
-      cluster_name:   { description: "Tên cluster EKS", required: true, default: "greenmart", type: string }
-      aws_region:     { description: "AWS region", required: true, default: "ap-southeast-1", type: string }
-      image_tag:      { description: "Tag image đẩy lên ECR và dùng trong overlay", required: true, default: "1.0.0", type: string }
-      stages:         { description: "Các giai đoạn chạy, ngăn cách bằng dấu phẩy: create (1 tạo EKS), bootstrap (2), terraform (3), push (4 image), deploy (5), media (6 ảnh + admin), legacy (7 migrate SQLite)", default: "create,bootstrap,terraform,push,deploy,media", type: string }
+      cluster_name:    { description: "Tên cluster EKS", required: true, default: "greenmart", type: string }
+      aws_region:      { description: "AWS region", required: true, default: "ap-southeast-1", type: string }
+      image_tag:       { description: "Tag image đẩy lên ECR và dùng trong overlay", required: true, default: "1.0.0", type: string }
       quick_nodegroup: { description: "1. [Optional] Tạo thêm nodegroup nhanh (không cần manifest)", default: false, type: boolean }
       db_instance_class: { description: "3. Loại instance RDS (gói Free: db.t4g.micro)", default: "db.t4g.micro", type: string }
       db_backup_retention_days: { description: "3. Số ngày giữ backup RDS (gói Free: 1)", default: "1", type: string }
+      migrate_legacy:  { description: "7. Chạy thêm bước migrate dữ liệu SQLite cũ", default: false, type: boolean }
       migrate_dry_run: { description: "7. Chỉ chạy thử (--dry-run), chưa ghi dữ liệu", default: true, type: boolean }
 
 permissions:
@@ -29,434 +31,66 @@ concurrency:
   group: deploy-eks-${{ inputs.cluster_name }}
   cancel-in-progress: false
 
-env:
-  CLUSTER_NAME: ${{ inputs.cluster_name }}
-  AWS_REGION: ${{ inputs.aws_region }}
-  TAG: ${{ inputs.image_tag }}
-  NS: greenmart
-
 jobs:
-  # ===========================================================================
-  # ### luồng build tạo eks bằng cluster-config.yaml ###
-  # ===========================================================================
-  create-eks:
-    if: ${{ contains(inputs.stages, 'create') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
+  create-cluster:
+    uses: ./.github/workflows/eks-step1-create-cluster.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
+      quick_nodegroup: ${{ inputs.quick_nodegroup }}
 
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-          kubeconfig: "false"   # cluster chưa tồn tại, kubeconfig cập nhật ở step bên dưới
-
-      - name: Cài eksctl
-        run: |
-          curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
-          sudo mv /tmp/eksctl /usr/local/bin/eksctl
-          eksctl version
-
-      - name: Tạo cluster từ cluster-config.yaml (bỏ qua nếu đã có)
-        run: |
-          if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
-            echo "Cluster $CLUSTER_NAME đã tồn tại, bỏ qua bước tạo."
-          else
-            cp infra/eks/cluster-config.yaml /tmp/cluster-config.yaml
-            sed -i "s/^  name: .*/  name: ${CLUSTER_NAME}/; s/^  region: .*/  region: ${AWS_REGION}/" /tmp/cluster-config.yaml
-            eksctl create cluster -f /tmp/cluster-config.yaml
-          fi
-
-      # Chạy lệnh sau để disable extended support cho EKS (giúp tiết kiệm chi phí)
-      - name: Tắt extended support cho EKS
-        run: |
-          aws eks update-cluster-config --name "$CLUSTER_NAME" --region "$AWS_REGION" --upgrade-policy supportType=STANDARD \
-            || echo "Cluster đã ở supportType=STANDARD hoặc đang được cập nhật."
-
-      # Chạy lệnh sau để update file config trong ~/.kube/config
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
-
-      # Check context
-      - name: Check context
-        run: kubectl config get-contexts
-
-      # [Optional] Set context nếu có nhiều cluster và current context chưa đúng
-      - name: Set context
-        run: kubectl config use-context "arn:aws:eks:${AWS_REGION}:${ACCOUNT_ID}:cluster/${CLUSTER_NAME}"
-
-      # Get cluster info
-      - name: Get cluster info
-        run: kubectl cluster-info
-
-      # LƯU Ý: có thể tạo nodegroup nhanh mà không cần file manifest
-      - name: "[Optional] Tạo nodegroup nhanh"
-        if: ${{ inputs.quick_nodegroup }}
-        run: |
-          eksctl create nodegroup --cluster="$CLUSTER_NAME" --region="$AWS_REGION" --name=my-node-group \
-            --node-type=t3.medium --nodes=2 --nodes-min=2 --nodes-max=2 --managed
-
-  # ===========================================================================
-  # ### sau đó dùng bootstrap.sh để cấu hình ###
-  # ===========================================================================
   bootstrap:
-    needs: create-eks
-    if: ${{ !failure() && !cancelled() && contains(inputs.stages, 'bootstrap') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
+    needs: create-cluster
+    uses: ./.github/workflows/eks-step2-bootstrap.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
 
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-
-      # bootstrap.sh là một script, tự chạy lần lượt 3 việc dưới đây trong một lần gọi:
-      #   - Cài OIDC cho cluster                 (enable-iam-roles-for-service-accounts)
-      #   - Cài plugin ALB Ingress Controller    (lbc-helm)
-      #   - Apply ứng dụng sample (2048 game)    (alb-ingress.html#application-load-balancer-sample-application)
-      - name: Cài OIDC + ALB Ingress Controller + apply sample 2048
-        env:
-          INSTALL_TOOLS: "true"
-          DEPLOY_SAMPLE: "true"
-        run: bash infra/eks-bootstrap/bootstrap.sh
-
-      # Sau khi test thành công, xóa sample (và ALB của nó): kubectl delete -f 2048_full.yaml --ignore-not-found
-      - name: Xóa sample 2048
-        env:
-          ACTION: delete-sample
-          INSTALL_TOOLS: "true"
-        run: bash infra/eks-bootstrap/bootstrap.sh
-
-  # ===========================================================================
-  # ### sau đó dùng terraform build rds và ebs ###
-  # ===========================================================================
   terraform:
     needs: bootstrap
-    if: ${{ !failure() && !cancelled() && contains(inputs.stages, 'terraform') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: infra/terraform
-    steps:
-      - uses: actions/checkout@v4
+    uses: ./.github/workflows/eks-step3-terraform.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
+      db_instance_class: ${{ inputs.db_instance_class }}
+      db_backup_retention_days: ${{ inputs.db_backup_retention_days }}
 
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "~1.10"
-          terraform_wrapper: false
-
-      # Runner bị xóa sau mỗi lần chạy nên state phải nằm ở S3 (khóa bằng use_lockfile, cần Terraform >= 1.10)
-      - name: Cấu hình backend S3 cho state
-        run: |
-          : "${TF_STATE_BUCKET:?Cần đặt repository variable TF_STATE_BUCKET}"
-          cat > backend.tf <<EOT
-          terraform {
-            backend "s3" {
-              bucket       = "${TF_STATE_BUCKET}"
-              key          = "greenmart/${CLUSTER_NAME}/terraform.tfstate"
-              region       = "${AWS_REGION}"
-              encrypt      = true
-              use_lockfile = true
-            }
-          }
-          EOT
-        env:
-          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-
-      # cd vào thư mục terraform, chỉnh các biến trong file .tfvars cho phù hợp
-      - name: Tạo terraform.tfvars
-        run: |
-          cat > terraform.tfvars <<EOT
-          region                   = "${AWS_REGION}"
-          cluster_name             = "${CLUSTER_NAME}"
-          db_instance_class        = "${{ inputs.db_instance_class }}"
-          db_backup_retention_days = ${{ inputs.db_backup_retention_days }}
-          db_multi_az              = false
-          db_deletion_protection   = false
-          db_skip_final_snapshot   = true
-          install_ebs_csi_addon    = true
-          EOT
-
-      - name: terraform init
-        run: terraform init -input=false
-
-      - name: terraform plan
-        run: terraform plan -input=false -out=tfplan
-
-      - name: terraform apply
-        run: terraform apply -input=false -auto-approve tfplan
-
-      # terraform output next_steps để lấy master (rds_master_secret_arn) và DB_HOST (rds_address)
-      - name: terraform output next_steps
-        run: |
-          terraform output next_steps
-          {
-            echo "### Terraform outputs"
-            echo "- rds_address: \`$(terraform output -raw rds_address)\`"
-            echo "- rds_master_secret_arn: \`$(terraform output -raw rds_master_secret_arn)\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Việc "lấy rds_address thay vào DB_HOST" được làm tự động ở job deploy-eks.
-
-  # ===========================================================================
-  # ### push image build ở local lên ECR ###
-  # ===========================================================================
   push-images:
     needs: terraform
-    if: ${{ !failure() && !cancelled() && contains(inputs.stages, 'push') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
+    uses: ./.github/workflows/eks-step4-push-images.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
+      image_tag: ${{ inputs.image_tag }}
 
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-          kubeconfig: "false"
-
-      # push-images.sh tự tạo repository ECR nếu chưa có, build và push 6 image (kể cả data-migrator)
-      - name: Push image lên ECR
-        run: bash k8s/overlays/eks/push-images.sh
-        env:
-          ACCOUNT_ID: ${{ env.ACCOUNT_ID }}
-          AWS_REGION: ${{ inputs.aws_region }}
-          TAG: ${{ inputs.image_tag }}
-
-  # ===========================================================================
-  # ### Deploy lên eks bằng các file trong overlay ###
-  # ===========================================================================
-  deploy-eks:
+  deploy:
     needs: push-images
-    if: ${{ !failure() && !cancelled() && contains(inputs.stages, 'deploy') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
+    uses: ./.github/workflows/eks-step5-deploy.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
+      image_tag: ${{ inputs.image_tag }}
 
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-
-      # Thay account id, tag image và DB_HOST (rds_address) trong overlay. Sửa trên runner, không commit.
-      - name: Điền ACCOUNT_ID, TAG và DB_HOST vào kustomization.yaml
-        run: |
-          RDS_ADDRESS=$(aws rds describe-db-instances --db-instance-identifier greenmart-mysql --region "$AWS_REGION" \
-                          --query 'DBInstances[0].Endpoint.Address' --output text)
-          [ -n "$RDS_ADDRESS" ] && [ "$RDS_ADDRESS" != "None" ] || { echo "Không tìm thấy RDS greenmart-mysql"; exit 1; }
-          F=k8s/overlays/eks/kustomization.yaml
-          sed -i "s/111122223333/${ACCOUNT_ID}/g; s/newTag: [0-9A-Za-z._-]*/newTag: ${TAG}/g; s/DB_HOST: [^ ]*/DB_HOST: ${RDS_ADDRESS}/" "$F"
-          grep -nE "newName|newTag|DB_HOST" "$F"
-
-      # sử dụng lệnh kubectl apply -k k8s/overlays/eks
-      - name: kubectl apply -k k8s/overlays/eks
-        run: kubectl apply -k k8s/overlays/eks
-
-      # đợi các job migrate hoàn tất
-      - name: Đợi Job migrate hoàn tất
-        run: kubectl -n "$NS" wait --for=condition=complete job -l app.kubernetes.io/component=migrate --timeout=300s
-
-      # xem trạng thái rollout của web và gateway
-      - name: Đợi rollout web và gateway
-        run: kubectl -n "$NS" rollout status deploy/web deploy/gateway --timeout=300s
-
-      # đợi ALB lên (kubectl get ingress greenmart-alb -w) và lấy address
-      - name: Đợi ALB có địa chỉ
-        id: alb
-        run: |
-          for i in $(seq 1 60); do
-            ADDR=$(kubectl -n "$NS" get ingress greenmart-alb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-            [ -n "$ADDR" ] && break
-            echo "Chờ ALB... ($i/60)"; sleep 10
-          done
-          [ -n "$ADDR" ] || { echo "ALB chưa có địa chỉ sau 10 phút"; kubectl -n "$NS" describe ingress greenmart-alb; exit 1; }
-          echo "ALB: $ADDR"
-          echo "address=$ADDR" >> "$GITHUB_OUTPUT"
-          echo "ALB: http://$ADDR" >> "$GITHUB_STEP_SUMMARY"
-
-      # thay address của ALB vào PUBLIC_HOST và CSRF_TRUSTED_ORIGINS
-      - name: Điền địa chỉ ALB vào PUBLIC_HOST và CSRF_TRUSTED_ORIGINS
-        run: |
-          F=k8s/overlays/eks/kustomization.yaml
-          ADDR='${{ steps.alb.outputs.address }}'
-          sed -i "s#PUBLIC_HOST: [^ ]*#PUBLIC_HOST: ${ADDR}#; s#CSRF_TRUSTED_ORIGINS: [^ ]*#CSRF_TRUSTED_ORIGINS: http://${ADDR}#" "$F"
-          grep -nE "PUBLIC_HOST|CSRF_TRUSTED_ORIGINS" "$F"
-
-      # apply lại overlay mới
-      - name: kubectl apply -k lần 2
-        run: kubectl apply -k k8s/overlays/eks
-
-      # rollout để user-service và web nhận cấu hình mới
-      - name: Rollout restart user-service và web
-        run: |
-          kubectl -n "$NS" rollout restart deploy/user-service deploy/web
-          kubectl -n "$NS" rollout status deploy/user-service deploy/web --timeout=300s
-
-      - name: Kiểm tra gateway-health
-        run: curl -fsS --retry 10 --retry-delay 15 --retry-all-errors "http://${{ steps.alb.outputs.address }}/gateway-health"
-
-  # ===========================================================================
-  # ### cho ảnh sản phẩm cũ vào volume EBS và tạo tk admin cho csdl ###
-  # ===========================================================================
   media-and-admin:
-    needs: deploy-eks
-    if: ${{ !failure() && !cancelled() && contains(inputs.stages, 'media') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      LC_ALL: C.UTF-8   # giữ đúng tên file tiếng Việt khi copy
-    steps:
-      - uses: actions/checkout@v4
+    needs: deploy
+    uses: ./.github/workflows/eks-step6-media-admin.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
 
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-
-      # POD=$(kubectl -n greenmart get pod -l app.kubernetes.io/name=catalog-service -o name | head -1)
-      - name: Lấy pod catalog-service
-        run: |
-          POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=catalog-service --field-selector=status.phase=Running -o name | head -1)
-          [ -n "$POD" ] || { echo "Không có pod catalog-service đang chạy"; exit 1; }
-          echo "POD=${POD#pod/}" >> "$GITHUB_ENV"
-
-      # copy media/products vào /media/products (dùng tar: không tạo thư mục lồng products/products, giữ tên file UTF-8)
-      # (Trên runner Linux không gặp lỗi đường dẫn của Git Bash nên không cần MSYS_NO_PATHCONV=1)
-      - name: Copy ảnh sản phẩm vào volume EBS
-        run: |
-          kubectl -n "$NS" exec "$POD" -- mkdir -p /media/products
-          tar -C media/products -cf - . | kubectl -n "$NS" exec -i "$POD" -- tar -xf - -C /media/products
-          kubectl -n "$NS" exec "$POD" -- ls -la /media/products
-
-      # kubectl exec ... createsuperuser (không tương tác: thông tin lấy từ secret/variable của repo)
-      - name: Tạo superuser cho user-service
-        env:
-          DJANGO_SUPERUSER_USERNAME: ${{ vars.DJANGO_SUPERUSER_USERNAME || 'admin' }}
-          DJANGO_SUPERUSER_EMAIL: ${{ vars.DJANGO_SUPERUSER_EMAIL || 'admin@example.com' }}
-          DJANGO_SUPERUSER_PASSWORD: ${{ secrets.DJANGO_SUPERUSER_PASSWORD }}
-        run: |
-          : "${DJANGO_SUPERUSER_PASSWORD:?Cần đặt secret DJANGO_SUPERUSER_PASSWORD}"
-          kubectl -n "$NS" exec deploy/user-service -- env \
-            DJANGO_SUPERUSER_USERNAME="$DJANGO_SUPERUSER_USERNAME" DJANGO_SUPERUSER_EMAIL="$DJANGO_SUPERUSER_EMAIL" \
-            DJANGO_SUPERUSER_PASSWORD="$DJANGO_SUPERUSER_PASSWORD" \
-            python manage.py createsuperuser --noinput || echo "Superuser đã tồn tại (bỏ qua)."
-
-      - name: Tạo superuser cho catalog-service
-        env:
-          DJANGO_SUPERUSER_USERNAME: ${{ vars.DJANGO_SUPERUSER_USERNAME || 'admin' }}
-          DJANGO_SUPERUSER_EMAIL: ${{ vars.DJANGO_SUPERUSER_EMAIL || 'admin@example.com' }}
-          DJANGO_SUPERUSER_PASSWORD: ${{ secrets.DJANGO_SUPERUSER_PASSWORD }}
-        run: |
-          : "${DJANGO_SUPERUSER_PASSWORD:?Cần đặt secret DJANGO_SUPERUSER_PASSWORD}"
-          kubectl -n "$NS" exec deploy/catalog-service -- env \
-            DJANGO_SUPERUSER_USERNAME="$DJANGO_SUPERUSER_USERNAME" DJANGO_SUPERUSER_EMAIL="$DJANGO_SUPERUSER_EMAIL" \
-            DJANGO_SUPERUSER_PASSWORD="$DJANGO_SUPERUSER_PASSWORD" \
-            python manage.py createsuperuser --noinput || echo "Superuser đã tồn tại (bỏ qua)."
-
-  # ===========================================================================
-  # ### Sau khi deploy thành công web -> migrate data từ sqlite3 của app cũ sang ###
-  # ===========================================================================
   migrate-legacy:
     needs: media-and-admin
-    if: ${{ !failure() && !cancelled() && contains(inputs.stages, 'legacy') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/eks-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          region: ${{ inputs.aws_region }}
-          cluster-name: ${{ inputs.cluster_name }}
-
-      # db.sqlite3 không nằm trong git: lấy từ legacy/db.sqlite3 (nếu bạn đưa vào repo riêng tư) hoặc từ S3 (vars.LEGACY_DB_S3_URI)
-      - name: Chuẩn bị file db.sqlite3
-        env:
-          LEGACY_DB_S3_URI: ${{ vars.LEGACY_DB_S3_URI }}
-        run: |
-          mkdir -p legacy
-          if [ -n "${LEGACY_DB_S3_URI:-}" ]; then aws s3 cp "$LEGACY_DB_S3_URI" legacy/db.sqlite3; fi
-          [ -s legacy/db.sqlite3 ] || { echo "Thiếu legacy/db.sqlite3. Đặt repository variable LEGACY_DB_S3_URI (s3://bucket/db.sqlite3) hoặc thêm file vào legacy/."; exit 1; }
-          ls -la legacy
-
-      # tạo PVC cho legacy data (SQLite) + pod upload dữ liệu vào PVC
-      - name: Tạo PVC greenmart-legacy-data và pod legacy-uploader
-        run: |
-          kubectl -n "$NS" apply -f - <<'EOF'
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: greenmart-legacy-data
-          spec:
-            storageClassName: ebs-gp3
-            accessModes: [ReadWriteOnce]
-            resources:
-              requests:
-                storage: 1Gi
-          ---
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: legacy-uploader
-          spec:
-            automountServiceAccountToken: false
-            containers:
-              - name: sh
-                image: busybox:1.36
-                command: ["sleep", "3600"]
-                volumeMounts:
-                  - { name: legacy, mountPath: /legacy }
-            volumes:
-              - name: legacy
-                persistentVolumeClaim:
-                  claimName: greenmart-legacy-data
-          EOF
-          kubectl -n "$NS" wait --for=condition=Ready pod/legacy-uploader --timeout=300s
-
-      # copy db.sqlite3 vào legacy-uploader
-      - name: Copy db.sqlite3 vào legacy-uploader
-        run: kubectl -n "$NS" cp ./legacy/db.sqlite3 legacy-uploader:/legacy/db.sqlite3
-
-      # kiểm tra trong legacy-uploader đã có db.sqlite3 chưa
-      - name: Kiểm tra db.sqlite3 trong legacy-uploader
-        run: kubectl -n "$NS" exec legacy-uploader -- ls -la /legacy
-
-      # giải phóng volume trước khi Job data-migrator gắn vào (PVC được giữ lại)
-      - name: Xóa pod legacy-uploader
-        run: kubectl -n "$NS" delete pod legacy-uploader --ignore-not-found
-
-      # apply job data-migrator (image ECR, user RDS là admin, bỏ --dry-run nếu migrate_dry_run=false)
-      - name: Apply job data-migrator
-        run: |
-          F=k8s/jobs/data-migrator.yaml
-          sed -i "s#image: greenmart/data-migrator#image: ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/greenmart/data-migrator:${TAG}#" "$F"
-          sed -i '/name: MYSQL_USER/{n;s/value: root/value: admin/}' "$F"
-          if [ "${{ inputs.migrate_dry_run }}" != "true" ]; then sed -i '/^        - --dry-run$/d' "$F"; fi
-          grep -nE "image:|value: admin|dry-run" "$F" || true
-          kubectl -n "$NS" delete job data-migrator --ignore-not-found
-          kubectl -n "$NS" apply -f "$F"
-
-      # kiểm tra log (kubectl logs job/data-migrator)
-      - name: Kiểm tra log data-migrator
-        run: |
-          kubectl -n "$NS" wait --for=condition=complete job/data-migrator --timeout=600s || {
-            kubectl -n "$NS" logs job/data-migrator || true
-            exit 1
-          }
-          kubectl -n "$NS" logs job/data-migrator
+    if: ${{ inputs.migrate_legacy }}
+    uses: ./.github/workflows/eks-step7-migrate-legacy.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
+      image_tag: ${{ inputs.image_tag }}
+      migrate_dry_run: ${{ inputs.migrate_dry_run }}
