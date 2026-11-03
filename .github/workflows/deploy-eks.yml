@@ -34,14 +34,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  Validate Nodegroup options:
-      shell: bash
-      run: |
-        if [[ -n "${{ inputs.manifest_path }}" && \
+  validate:
+    name: Validate Nodegroup options
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Nodegroup options
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.manifest_path }}" && \
                 "${{ inputs.quick_nodegroup }}" == "true" ]]; then
             echo "::error::Không thể sử dụng manifest_path và quick_nodegroup cùng lúc."
             exit 1
-        fi
+          fi
 
   create-cluster:
     uses: ./.github/workflows/eks-step1-create-cluster.yml
