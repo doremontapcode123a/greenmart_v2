@@ -9,12 +9,13 @@ on:
       cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
       aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
       quick_nodegroup: { description: "[Optional] Tạo thêm nodegroup nhanh (không cần manifest)", required: false, default: false, type: boolean }
+      manifest_path: { description: "[Optional] Đường dẫn manifest nodegroup (nếu muốn tạo nodegroup theo manifest)", required: false, default: "infra/eks/cluster-config.yaml", type: string }
   workflow_dispatch:
     inputs:
       cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
       aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
       quick_nodegroup: { description: "[Optional] Tạo thêm nodegroup nhanh (không cần manifest)", required: false, default: false, type: boolean }
-
+      manifest_path: { description: "[Optional] Đường dẫn manifest nodegroup (nếu muốn tạo nodegroup theo manifest)", required: false, default: "infra/eks/cluster-config.yaml", type: string }
 permissions:
   id-token: write
   contents: read
@@ -40,19 +41,21 @@ jobs:
           region: ${{ inputs.aws_region }}
           cluster-name: ${{ inputs.cluster_name }}
           kubeconfig: "false"   # cluster chưa tồn tại, kubeconfig cập nhật ở step bên dưới
-
-      - name: Cài eksctl
+      - name:Validate Nodegroup options:
+        shell: bash
         run: |
-          curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
-          sudo mv /tmp/eksctl /usr/local/bin/eksctl
-          eksctl version
-
+          if [[ -n "${{ inputs.manifest_path }}" && \
+                "${{ inputs.quick_nodegroup }}" == "true" ]]; then
+             echo "::error::Không thể sử dụng manifest_path và quick_nodegroup cùng lúc."
+             exit 1
+          fi
+      
       - name: Tạo cluster từ cluster-config.yaml (bỏ qua nếu đã có)
         run: |
           if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
             echo "Cluster $CLUSTER_NAME đã tồn tại, bỏ qua bước tạo."
           else
-            cp infra/eks/cluster-config.yaml /tmp/cluster-config.yaml
+            cp "${{ inputs.manifest_path }}" /tmp/cluster-config.yaml
             sed -i "s/^  name: .*/  name: ${CLUSTER_NAME}/; s/^  region: .*/  region: ${AWS_REGION}/" /tmp/cluster-config.yaml
             eksctl create cluster -f /tmp/cluster-config.yaml
           fi
@@ -84,4 +87,4 @@ jobs:
         if: ${{ inputs.quick_nodegroup }}
         run: |
           eksctl create nodegroup --cluster="$CLUSTER_NAME" --region="$AWS_REGION" --name=my-node-group \
-            --node-type=t3.medium --nodes=2 --nodes-min=2 --nodes-max=2 --managed
+            --node-type=t3.micro --nodes=2 --nodes-min=2 --nodes-max=2 --managed

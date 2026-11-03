@@ -17,11 +17,13 @@ on:
       cluster_name:    { description: "Tên cluster EKS", required: true, default: "greenmart", type: string }
       aws_region:      { description: "AWS region", required: true, default: "ap-southeast-1", type: string }
       image_tag:       { description: "Tag image đẩy lên ECR và dùng trong overlay", required: true, default: "1.0.0", type: string }
+      manifest_path: { description: "[Optional] Đường dẫn manifest nodegroup (nếu muốn tạo nodegroup theo manifest)", required: false, default: "infra/eks/cluster-config.yaml", type: string }
       quick_nodegroup: { description: "1. [Optional] Tạo thêm nodegroup nhanh (không cần manifest)", default: false, type: boolean }
       db_instance_class: { description: "3. Loại instance RDS (gói Free: db.t4g.micro)", default: "db.t4g.micro", type: string }
       db_backup_retention_days: { description: "3. Số ngày giữ backup RDS (gói Free: 1)", default: "1", type: string }
       migrate_legacy:  { description: "7. Chạy thêm bước migrate dữ liệu SQLite cũ", default: false, type: boolean }
       migrate_dry_run: { description: "7. Chỉ chạy thử (--dry-run), chưa ghi dữ liệu", default: true, type: boolean }
+      
 
 permissions:
   id-token: write   # assume role bằng OIDC
@@ -32,6 +34,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  Validate Nodegroup options:
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.manifest_path }}" && \
+                "${{ inputs.quick_nodegroup }}" == "true" ]]; then
+            echo "::error::Không thể sử dụng manifest_path và quick_nodegroup cùng lúc."
+            exit 1
+        fi
+
   create-cluster:
     uses: ./.github/workflows/eks-step1-create-cluster.yml
     secrets: inherit
@@ -39,6 +50,7 @@ jobs:
       cluster_name: ${{ inputs.cluster_name }}
       aws_region: ${{ inputs.aws_region }}
       quick_nodegroup: ${{ inputs.quick_nodegroup }}
+      manifest_path: ${{ inputs.manifest_path }}
 
   bootstrap:
     needs: create-cluster

@@ -1,7 +1,7 @@
 # ### Deploy lên eks bằng các file trong overlay ###
 # Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
 # Cần secrets/variables như mô tả ở đầu deploy-eks.yml.
-name: "EKS 5 - Deploy bằng overlay"
+name: "EKS 5 - Deploy lên EKS"
 
 on:
   workflow_call:
