@@ -1,0 +1,138 @@
+# ### Deploy lên eks bằng Argo CD (GitOps) ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
+# Argo CD đồng bộ k8s/overlays/eks từ Git, thay cho `kubectl apply -k`. Vì vậy các file trong repo PHẢI đã được push lên GitHub.
+# Cần: secrets.AWS_ROLE_TO_ASSUME; (repo private) secrets.ARGOCD_REPO_TOKEN = PAT/token đọc repo.
+name: "EKS 5 - Deploy bằng Argo CD"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.1.0", type: string }
+      argocd_version: { description: "Phiên bản Argo CD", required: false, default: "v3.5.7", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      image_tag:    { description: "Tag image trên ECR / trong overlay", required: false, default: "1.1.0", type: string }
+      argocd_version: { description: "Phiên bản Argo CD", required: false, default: "v3.5.7", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+  IMAGE_TAG: ${{ inputs.image_tag }}
+  ARGOCD_VERSION: ${{ inputs.argocd_version }}
+  REPO_URL: https://github.com/${{ github.repository }}.git
+  REPO_REVISION: ${{ github.ref_name }}
+  RENDER_VARS: '$REPO_URL $REPO_REVISION $ECR_REGISTRY $IMAGE_TAG $DB_HOST $PUBLIC_HOST $CSRF_TRUSTED_ORIGINS'
+
+jobs:
+  deploy-eks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      # Cài Argo CD (server-side apply vì CRD lớn). Dex và notifications không dùng nên tắt để tiết kiệm RAM.
+      - name: Cài Argo CD
+        run: |
+          kubectl get namespace argocd >/dev/null 2>&1 || kubectl create namespace argocd
+          kubectl apply -n argocd --server-side --force-conflicts \
+            -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+          kubectl -n argocd scale deployment/argocd-dex-server deployment/argocd-notifications-controller --replicas=0 || true
+          kubectl -n argocd rollout status deployment/argocd-server deployment/argocd-repo-server deployment/argocd-applicationset-controller --timeout=300s
+          kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
+
+      # Repo private: đăng ký thông tin đọc repo cho Argo CD (bỏ qua nếu không đặt ARGOCD_REPO_TOKEN)
+      - name: Đăng ký repository cho Argo CD
+        env:
+          ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
+        run: |
+          if [ -z "${ARGOCD_REPO_TOKEN:-}" ]; then echo "Không có ARGOCD_REPO_TOKEN: coi như repo public."; exit 0; fi
+          kubectl -n argocd create secret generic repo-greenmart \
+            --from-literal=type=git --from-literal=url="$REPO_URL" \
+            --from-literal=username=argocd --from-literal=password="$ARGOCD_REPO_TOKEN" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n argocd label secret repo-greenmart argocd.argoproj.io/secret-type=repository --overwrite
+
+      - name: Tính các giá trị của môi trường (ECR, DB_HOST)
+        run: |
+          RDS_ADDRESS=$(aws rds describe-db-instances --db-instance-identifier greenmart-mysql --region "$AWS_REGION" \
+                          --query 'DBInstances[0].Endpoint.Address' --output text)
+          [ -n "$RDS_ADDRESS" ] && [ "$RDS_ADDRESS" != "None" ] || { echo "Không tìm thấy RDS greenmart-mysql"; exit 1; }
+          {
+            echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+            echo "DB_HOST=${RDS_ADDRESS}"
+            echo "PUBLIC_HOST=localhost"                          # tạm; thay bằng địa chỉ ALB ở bước sau
+            echo "CSRF_TRUSTED_ORIGINS=http://localhost"
+          } >> "$GITHUB_ENV"
+
+      # Đăng ký Application greenmart: Argo CD tự đồng bộ k8s/overlays/eks từ Git (kèm override image/tag/DB_HOST)
+      - name: Apply Application greenmart
+        run: envsubst "$RENDER_VARS" < gitops/apps/greenmart.yaml.tpl | kubectl apply -f -
+
+      - name: Đợi Argo CD đồng bộ greenmart (Synced + Healthy)
+        run: |
+          kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced application/greenmart --timeout=900s || {
+            kubectl -n argocd get application greenmart -o jsonpath='{.status.conditions}{"\n"}{.status.operationState.message}{"\n"}'
+            exit 1; }
+          kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application/greenmart --timeout=900s || {
+            kubectl -n argocd get application greenmart -o yaml | tail -60
+            exit 1; }
+
+      - name: Đợi Job migrate hoàn tất
+        run: kubectl -n "$NS" wait --for=condition=complete job -l app.kubernetes.io/component=migrate --timeout=300s
+
+      - name: Đợi ALB có địa chỉ
+        id: alb
+        run: |
+          for i in $(seq 1 60); do
+            ADDR=$(kubectl -n "$NS" get ingress greenmart-alb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            [ -n "$ADDR" ] && break
+            echo "Chờ ALB... ($i/60)"; sleep 10
+          done
+          [ -n "$ADDR" ] || { echo "ALB chưa có địa chỉ sau 10 phút"; kubectl -n "$NS" describe ingress greenmart-alb; exit 1; }
+          echo "address=$ADDR" >> "$GITHUB_OUTPUT"
+          echo "ALB: http://$ADDR" >> "$GITHUB_STEP_SUMMARY"
+
+      # Điền địa chỉ ALB vào PUBLIC_HOST / CSRF_TRUSTED_ORIGINS bằng cách cập nhật lại Application (không sửa file trong Git)
+      - name: Cập nhật Application với địa chỉ ALB
+        run: |
+          export PUBLIC_HOST='${{ steps.alb.outputs.address }}'
+          export CSRF_TRUSTED_ORIGINS="http://${PUBLIC_HOST}"
+          envsubst "$RENDER_VARS" < gitops/apps/greenmart.yaml.tpl | kubectl apply -f -
+          kubectl -n argocd annotate application greenmart argocd.argoproj.io/refresh=hard --overwrite
+          sleep 20
+          kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced application/greenmart --timeout=600s
+
+      - name: Rollout restart user-service và web
+        run: |
+          kubectl -n "$NS" rollout restart deploy/user-service deploy/web
+          kubectl -n "$NS" rollout status deploy/user-service deploy/web --timeout=300s
+
+      - name: Kiểm tra gateway-health
+        run: curl -fsS --retry 10 --retry-delay 15 --retry-all-errors "http://${{ steps.alb.outputs.address }}/gateway-health"
+
+      - name: Hướng dẫn mở giao diện Argo CD
+        run: |
+          {
+            echo "### Argo CD"
+            echo '```'
+            echo "kubectl -n argocd port-forward svc/argocd-server 8080:443   # rồi mở https://localhost:8080 (user: admin)"
+            echo "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

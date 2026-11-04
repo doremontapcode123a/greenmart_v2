@@ -75,3 +75,8 @@ REST_FRAMEWORK = {
 }
 
 JAZZMIN_SETTINGS = {"site_title": "GreenMart – Catalog", "site_header": "GreenMart Catalog", "welcome_sign": "GreenMart – quản trị danh mục & sản phẩm"}
+
+# Quan sát: Prometheus /metrics + AWS X-Ray (bật bằng ENABLE_PROMETHEUS / ENABLE_XRAY, mặc định tắt).
+from greenmart_common.observability import apply as _apply_observability  # noqa: E402
+
+_apply_observability(globals(), "catalog-service")

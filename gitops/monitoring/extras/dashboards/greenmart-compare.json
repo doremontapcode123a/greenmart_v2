@@ -1,0 +1,1022 @@
+{
+  "uid": "greenmart-compare",
+  "title": "GreenMart – So sánh Prometheus / CloudWatch / X-Ray",
+  "tags": [
+    "greenmart",
+    "compare"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "type": "textbox",
+        "label": "Tên cluster EKS",
+        "query": "greenmart",
+        "current": {
+          "text": "greenmart",
+          "value": "greenmart"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "greenmart",
+            "value": "greenmart"
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Cách đọc dashboard",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 6
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Nguồn số liệu:** Prometheus (django-prometheus, cAdvisor, node-exporter) · CloudWatch (ALB, Container Insights) · X-Ray (trace từ aws-xray-sdk).\n\n**Độ lệch KHÔNG phải lúc nào cũng là lỗi đo.** Nguyên nhân thường gặp: (1) *phạm vi khác nhau*: ALB chỉ thấy request vào qua load balancer, Prometheus đếm theo từng service Django; nginx tự phục vụ `/static/` nên không có trong Prometheus; (2) *chu kỳ lấy mẫu*: Prometheus scrape 15s, CloudWatch gộp theo phút, Container Insights ~60s; (3) *định nghĩa chỉ số*: CPU/RAM từ cAdvisor và từ CloudWatch agent tính hơi khác; (4) *lấy mẫu trace*: X-Ray chỉ ghi phần request được sample (đang đặt 100% trừ health/metrics) và trễ vài chục giây; (5) *làm tròn theo bước thời gian*. Hãy xem **xu hướng và độ lệch ổn định**, đừng so từng điểm.\n\nBiến `cluster` là tên cluster EKS (khớp nhãn `ClusterName` của Container Insights)."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Số request/phút: Prometheus (web + ảnh /media) vs ALB RequestCount",
+      "description": "Prometheus = web + catalog phục vụ /media (các đường đi qua ALB → gateway), bỏ health và /metrics. CloudWatch = AWS/ApplicationELB RequestCount (Sum, 1 phút).",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(increase(django_http_responses_total_by_status_view_method_total{service=\"web\",view!~\"greenmart_common.health.health|django_prometheus.exports.ExportToDjangoView\"}[1m])) + sum(increase(django_http_responses_total_by_status_view_method_total{service=\"catalog-service\",view=\"django.views.static.serve\"}[1m]))",
+          "legendFormat": "Prometheus (web + /media)",
+          "interval": "1m",
+          "hide": false,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "RequestCount",
+          "dimensions": {
+            "LoadBalancer": [
+              "*"
+            ]
+          },
+          "matchExact": false,
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "label": "ALB RequestCount",
+          "id": "",
+          "expression": "",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Độ lệch % = (Prometheus − CloudWatch) / CloudWatch",
+      "description": "Dương: Prometheus đo cao hơn CloudWatch. Âm: thấp hơn.",
+      "gridPos": {
+        "x": 14,
+        "y": 6,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(increase(django_http_responses_total_by_status_view_method_total{service=\"web\",view!~\"greenmart_common.health.health|django_prometheus.exports.ExportToDjangoView\"}[1m])) + sum(increase(django_http_responses_total_by_status_view_method_total{service=\"catalog-service\",view=\"django.views.static.serve\"}[1m]))",
+          "legendFormat": "Prometheus (web + /media)",
+          "interval": "1m",
+          "hide": true,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "RequestCount",
+          "dimensions": {
+            "LoadBalancer": [
+              "*"
+            ]
+          },
+          "matchExact": false,
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "label": "ALB RequestCount",
+          "id": "",
+          "expression": "",
+          "hide": true
+        },
+        {
+          "datasource": {
+            "name": "Expression",
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "refId": "C",
+          "type": "math",
+          "expression": "($A-$B)/($B+0.0001)*100",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Lỗi 5xx/phút: Prometheus vs ALB HTTPCode_Target_5XX_Count",
+      "description": "5xx do ứng dụng (web, catalog) trả. ALB: HTTPCode_Target_5XX_Count (5xx do target, không tính 5xx do chính ALB).",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(increase(django_http_responses_total_by_status_view_method_total{service=~\"web|catalog-service\",status=~\"5..\",view!~\"greenmart_common.health.health|django_prometheus.exports.ExportToDjangoView\"}[1m]))",
+          "legendFormat": "Prometheus 5xx",
+          "interval": "1m",
+          "hide": false,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "HTTPCode_Target_5XX_Count",
+          "dimensions": {
+            "LoadBalancer": [
+              "*"
+            ]
+          },
+          "matchExact": false,
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "label": "ALB Target 5XX",
+          "id": "",
+          "expression": "",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Độ lệch % = (Prometheus − CloudWatch) / CloudWatch",
+      "description": "Dương: Prometheus đo cao hơn CloudWatch. Âm: thấp hơn.",
+      "gridPos": {
+        "x": 14,
+        "y": 14,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(increase(django_http_responses_total_by_status_view_method_total{service=~\"web|catalog-service\",status=~\"5..\",view!~\"greenmart_common.health.health|django_prometheus.exports.ExportToDjangoView\"}[1m]))",
+          "legendFormat": "Prometheus 5xx",
+          "interval": "1m",
+          "hide": true,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "HTTPCode_Target_5XX_Count",
+          "dimensions": {
+            "LoadBalancer": [
+              "*"
+            ]
+          },
+          "matchExact": false,
+          "statistic": "Sum",
+          "period": "60",
+          "region": "default",
+          "label": "ALB Target 5XX",
+          "id": "",
+          "expression": "",
+          "hide": true
+        },
+        {
+          "datasource": {
+            "name": "Expression",
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "refId": "C",
+          "type": "math",
+          "expression": "($A-$B)/($B+0.0001)*100",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "X-Ray: số request và lỗi/phút của service greenmart-web",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 8
+      },
+      "description": "Thống kê trace của X-Ray (service greenmart-web). Chỉ gồm request được lấy mẫu. Nếu truy vấn báo lỗi, chọn lại 'Time series service statistics' trong editor và lọc service greenmart-web.",
+      "datasource": {
+        "type": "grafana-x-ray-datasource",
+        "uid": "xray"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-x-ray-datasource",
+            "uid": "xray"
+          },
+          "refId": "A",
+          "queryType": "getTimeSeriesServiceStatistics",
+          "query": "service(\"greenmart-web\")",
+          "columns": [
+            "TotalCount",
+            "ErrorStatistics.TotalCount",
+            "FaultStatistics.TotalCount"
+          ],
+          "region": "default"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "CPU pod (namespace greenmart), millicore: Prometheus vs Container Insights",
+      "description": "Prometheus: cAdvisor container_cpu_usage_seconds_total. CloudWatch: ContainerInsights pod_cpu_usage_total (SUM theo PodName).",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"greenmart\",container!=\"\",container!=\"POD\"}[1m]))*1000",
+          "legendFormat": "Prometheus",
+          "interval": "1m",
+          "hide": false,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(pod_cpu_usage_total) FROM SCHEMA(\"ContainerInsights\", ClusterName, Namespace, PodName) WHERE ClusterName = '${cluster}' AND Namespace = 'greenmart'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Độ lệch % = (Prometheus − CloudWatch) / CloudWatch",
+      "description": "Dương: Prometheus đo cao hơn CloudWatch. Âm: thấp hơn.",
+      "gridPos": {
+        "x": 14,
+        "y": 30,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"greenmart\",container!=\"\",container!=\"POD\"}[1m]))*1000",
+          "legendFormat": "Prometheus",
+          "interval": "1m",
+          "hide": true,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(pod_cpu_usage_total) FROM SCHEMA(\"ContainerInsights\", ClusterName, Namespace, PodName) WHERE ClusterName = '${cluster}' AND Namespace = 'greenmart'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": true
+        },
+        {
+          "datasource": {
+            "name": "Expression",
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "refId": "C",
+          "type": "math",
+          "expression": "($A-$B)/($B+0.0001)*100",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "RAM pod (namespace greenmart): Prometheus vs Container Insights",
+      "description": "Prometheus: container_memory_working_set_bytes. CloudWatch: pod_memory_working_set (SUM theo PodName).",
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"greenmart\",container!=\"\",container!=\"POD\"})",
+          "legendFormat": "Prometheus",
+          "interval": "1m",
+          "hide": false,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(pod_memory_working_set) FROM SCHEMA(\"ContainerInsights\", ClusterName, Namespace, PodName) WHERE ClusterName = '${cluster}' AND Namespace = 'greenmart'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Độ lệch % = (Prometheus − CloudWatch) / CloudWatch",
+      "description": "Dương: Prometheus đo cao hơn CloudWatch. Âm: thấp hơn.",
+      "gridPos": {
+        "x": 14,
+        "y": 38,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"greenmart\",container!=\"\",container!=\"POD\"})",
+          "legendFormat": "Prometheus",
+          "interval": "1m",
+          "hide": true,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(pod_memory_working_set) FROM SCHEMA(\"ContainerInsights\", ClusterName, Namespace, PodName) WHERE ClusterName = '${cluster}' AND Namespace = 'greenmart'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": true
+        },
+        {
+          "datasource": {
+            "name": "Expression",
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "refId": "C",
+          "type": "math",
+          "expression": "($A-$B)/($B+0.0001)*100",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "CPU node (tất cả node), millicore: node-exporter vs Container Insights",
+      "description": "Prometheus: node_cpu_seconds_total (mode != idle). CloudWatch: node_cpu_usage_total (SUM theo node).",
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[1m]))*1000",
+          "legendFormat": "node-exporter",
+          "interval": "1m",
+          "hide": false,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(node_cpu_usage_total) FROM SCHEMA(\"ContainerInsights\", ClusterName, InstanceId, NodeName) WHERE ClusterName = '${cluster}'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Độ lệch % = (Prometheus − CloudWatch) / CloudWatch",
+      "description": "Dương: Prometheus đo cao hơn CloudWatch. Âm: thấp hơn.",
+      "gridPos": {
+        "x": 14,
+        "y": 46,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[1m]))*1000",
+          "legendFormat": "node-exporter",
+          "interval": "1m",
+          "hide": true,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(node_cpu_usage_total) FROM SCHEMA(\"ContainerInsights\", ClusterName, InstanceId, NodeName) WHERE ClusterName = '${cluster}'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": true
+        },
+        {
+          "datasource": {
+            "name": "Expression",
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "refId": "C",
+          "type": "math",
+          "expression": "($A-$B)/($B+0.0001)*100",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "RAM node (tất cả node): node-exporter vs Container Insights",
+      "description": "Prometheus: MemTotal − MemAvailable. CloudWatch: node_memory_working_set (SUM theo node).",
+      "gridPos": {
+        "x": 0,
+        "y": 54,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)",
+          "legendFormat": "node-exporter",
+          "interval": "1m",
+          "hide": false,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(node_memory_working_set) FROM SCHEMA(\"ContainerInsights\", ClusterName, InstanceId, NodeName) WHERE ClusterName = '${cluster}'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Độ lệch % = (Prometheus − CloudWatch) / CloudWatch",
+      "description": "Dương: Prometheus đo cao hơn CloudWatch. Âm: thấp hơn.",
+      "gridPos": {
+        "x": 14,
+        "y": 54,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)",
+          "legendFormat": "node-exporter",
+          "interval": "1m",
+          "hide": true,
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 1,
+          "metricEditorMode": 1,
+          "sqlExpression": "SELECT SUM(node_memory_working_set) FROM SCHEMA(\"ContainerInsights\", ClusterName, InstanceId, NodeName) WHERE ClusterName = '${cluster}'",
+          "region": "default",
+          "period": "60",
+          "label": "Container Insights",
+          "id": "",
+          "expression": "",
+          "hide": true
+        },
+        {
+          "datasource": {
+            "name": "Expression",
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "refId": "C",
+          "type": "math",
+          "expression": "($A-$B)/($B+0.0001)*100",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

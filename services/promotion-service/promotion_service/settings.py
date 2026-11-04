@@ -38,3 +38,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["greenmart_common.internal_auth.IsInternalService"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
 }
+
+# Quan sát: Prometheus /metrics + AWS X-Ray (bật bằng ENABLE_PROMETHEUS / ENABLE_XRAY, mặc định tắt).
+from greenmart_common.observability import apply as _apply_observability  # noqa: E402
+
+_apply_observability(globals(), "promotion-service")

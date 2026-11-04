@@ -1,0 +1,48 @@
+# AWS X-Ray daemon: nhận trace (UDP 2000) từ aws-xray-sdk trong các service và đẩy lên X-Ray;
+# cổng TCP 2000 để SDK lấy luật lấy mẫu (sampling rules) từ X-Ray.
+# Annotation IRSA (eks.amazonaws.com/role-arn) và AWS_REGION được thêm bằng patch trong Application.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: xray-daemon
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xray-daemon
+  labels:
+    app.kubernetes.io/name: xray-daemon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: xray-daemon
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: xray-daemon
+    spec:
+      serviceAccountName: xray-daemon
+      containers:
+        - name: xray-daemon
+          image: public.ecr.aws/xray/aws-xray-daemon:3.7.1
+          args: ["-b", "0.0.0.0:2000", "-t", "0.0.0.0:2000", "-o"]   # -o: không dò EC2 metadata (dùng IRSA + AWS_REGION)
+          ports:
+            - { name: xray-udp, containerPort: 2000, protocol: UDP }
+            - { name: xray-tcp, containerPort: 2000, protocol: TCP }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xray-daemon
+  labels:
+    app.kubernetes.io/name: xray-daemon
+spec:
+  selector:
+    app.kubernetes.io/name: xray-daemon
+  ports:
+    - { name: xray-udp, port: 2000, targetPort: 2000, protocol: UDP }
+    - { name: xray-tcp, port: 2000, targetPort: 2000, protocol: TCP }

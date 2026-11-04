@@ -28,3 +28,13 @@ output "next_steps" {
     3) kubectl apply -k k8s/overlays/eks   (xem k8s/overlays/eks/README.md)
   EOT
 }
+
+output "grafana_role_arn" {
+  description = "Role IRSA cho Grafana (đọc CloudWatch + X-Ray)."
+  value       = try(aws_iam_role.irsa["grafana"].arn, null)
+}
+
+output "xray_daemon_role_arn" {
+  description = "Role IRSA cho X-Ray daemon."
+  value       = try(aws_iam_role.irsa["xray-daemon"].arn, null)
+}

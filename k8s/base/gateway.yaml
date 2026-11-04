@@ -29,6 +29,7 @@ data:
 
             location /static/ { alias /staticfiles/; }
             location /media/  { alias /media/; }
+            location = /metrics { return 404; }
 
             location /admin/catalog/ { proxy_pass http://catalog_service; include /etc/nginx/proxy_params; }
             location /admin/         { proxy_pass http://user_service;    include /etc/nginx/proxy_params; }

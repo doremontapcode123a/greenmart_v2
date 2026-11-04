@@ -3,6 +3,7 @@ from django.http import HttpResponse
 from django.urls import include, path
 
 from greenmart_common.health import make_health_view
+from greenmart_common.observability import observability_urls
 
 urlpatterns = [
     path("health/", make_health_view("user-service")),
@@ -12,3 +13,6 @@ urlpatterns = [
     # Link thật trỏ tới trang của web (BFF): /resert/<uid>/<token>/ (cùng đường dẫn).
     path("resert/<uidb64>/<token>/", lambda request, uidb64, token: HttpResponse(status=404), name="password_reset_confirm"),
 ]
+
+# /metrics cho Prometheus (chỉ khi ENABLE_PROMETHEUS=1); đặt đầu danh sách để không bị route khác nuốt.
+urlpatterns = observability_urls() + urlpatterns

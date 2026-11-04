@@ -98,3 +98,14 @@ variable "email_host_password" {
   default     = ""
   sensitive   = true
 }
+variable "enable_monitoring" {
+  description = "Tạo addon CloudWatch Container Insights, role IRSA (Grafana, X-Ray daemon) và luật lấy mẫu X-Ray."
+  type        = bool
+  default     = true
+}
+
+variable "xray_sample_rate" {
+  description = "Tỉ lệ lấy mẫu trace X-Ray cho request thường (1 = ghi 100%, dùng khi so sánh số request với Prometheus; hạ xuống để giảm chi phí)."
+  type        = number
+  default     = 1
+}

@@ -1,0 +1,25 @@
+# Cho phép Prometheus (namespace `monitoring`) scrape /metrics của các service Django (cổng 8000).
+# Gateway KHÔNG nằm trong danh sách và còn chặn /metrics ở nginx, nên không lộ ra Internet.
+# Chỉ có tác dụng khi CNI bật NetworkPolicy (VPC CNI: bật network policy; hoặc Calico/Cilium).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  labels:
+    app.kubernetes.io/name: netpol
+    app.kubernetes.io/part-of: greenmart
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [web, user-service, catalog-service, order-service, promotion-service]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8000

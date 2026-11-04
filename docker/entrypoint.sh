@@ -5,6 +5,10 @@
 #   DJANGO_SUPERUSER_*   nếu có, tạo superuser cho Django admin (service có admin)
 set -e
 
+if [ -n "${PROMETHEUS_MULTIPROC_DIR:-}" ]; then
+  rm -rf "$PROMETHEUS_MULTIPROC_DIR"; mkdir -p "$PROMETHEUS_MULTIPROC_DIR"
+fi
+
 if [ "${RUN_MIGRATE:-1}" = "1" ]; then
   echo "[entrypoint] migrate..."
   n=0

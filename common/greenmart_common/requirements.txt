@@ -3,3 +3,5 @@ djangorestframework==3.16.0
 requests==2.32.3
 mysqlclient==2.2.7
 gunicorn==23.0.0
+django-prometheus==2.5.0
+aws-xray-sdk==2.16.0

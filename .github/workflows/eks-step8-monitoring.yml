@@ -1,0 +1,87 @@
+# ### Giám sát: Prometheus + Grafana + X-Ray daemon (cài bằng Argo CD) và so sánh với CloudWatch/X-Ray ###
+# Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow.
+# Cần: Argo CD đã cài (bước 5), Terraform bước 3 đã tạo role IRSA và addon CloudWatch (enable_monitoring=true).
+name: "EKS 8 - Monitoring (Prometheus, Grafana, X-Ray, CloudWatch)"
+
+on:
+  workflow_call:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+  workflow_dispatch:
+    inputs:
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  REPO_URL: https://github.com/${{ github.repository }}.git
+  REPO_REVISION: ${{ github.ref_name }}
+  RENDER_VARS: '$REPO_URL $REPO_REVISION $GRAFANA_ROLE_ARN $XRAY_ROLE_ARN $AWS_REGION'
+
+jobs:
+  monitoring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+
+      - name: Kiểm tra Argo CD và role IRSA
+        run: |
+          kubectl -n argocd get deployment argocd-server >/dev/null || { echo "Chưa cài Argo CD (chạy bước 5 trước)"; exit 1; }
+          GRAFANA_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/greenmart-${CLUSTER_NAME}-grafana"
+          XRAY_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/greenmart-${CLUSTER_NAME}-xray-daemon"
+          aws iam get-role --role-name "greenmart-${CLUSTER_NAME}-grafana" >/dev/null || { echo "Thiếu role Grafana: chạy Terraform với enable_monitoring=true"; exit 1; }
+          aws iam get-role --role-name "greenmart-${CLUSTER_NAME}-xray-daemon" >/dev/null || { echo "Thiếu role X-Ray daemon"; exit 1; }
+          { echo "GRAFANA_ROLE_ARN=$GRAFANA_ROLE_ARN"; echo "XRAY_ROLE_ARN=$XRAY_ROLE_ARN"; } >> "$GITHUB_ENV"
+
+      # Mật khẩu admin Grafana ngẫu nhiên, chỉ tạo khi chưa có (chạy lại không đổi mật khẩu)
+      - name: Tạo namespace monitoring và Secret grafana-admin
+        run: |
+          kubectl get namespace monitoring >/dev/null 2>&1 || kubectl create namespace monitoring
+          if ! kubectl -n monitoring get secret grafana-admin >/dev/null 2>&1; then
+            kubectl -n monitoring create secret generic grafana-admin \
+              --from-literal=admin-user=admin \
+              --from-literal=admin-password="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)"
+          fi
+
+      - name: Apply Application monitoring-stack (Prometheus + Grafana)
+        run: envsubst "$RENDER_VARS" < gitops/apps/monitoring-stack.yaml.tpl | kubectl apply -f -
+
+      - name: Apply Application monitoring-extras (X-Ray daemon, PodMonitor, dashboard)
+        run: envsubst "$RENDER_VARS" < gitops/apps/monitoring-extras.yaml.tpl | kubectl apply -f -
+
+      - name: Đợi Argo CD đồng bộ monitoring (Synced + Healthy)
+        run: |
+          for app in monitoring-stack monitoring-extras; do
+            kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced application/$app --timeout=1200s || {
+              kubectl -n argocd get application $app -o jsonpath='{.status.conditions}{"\n"}{.status.operationState.message}{"\n"}'; exit 1; }
+            kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application/$app --timeout=1200s || {
+              kubectl -n argocd get application $app -o yaml | tail -60; exit 1; }
+          done
+          kubectl -n monitoring get pods
+
+      - name: Hướng dẫn truy cập Grafana / Prometheus
+        run: |
+          {
+            echo "### Monitoring"
+            echo '```'
+            echo "kubectl -n monitoring port-forward svc/kps-grafana 3000:80                              # Grafana http://localhost:3000 (user: admin)"
+            echo "kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d"
+            echo "kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090    # Prometheus http://localhost:9090"
+            echo '```'
+            echo "Dashboard: **GreenMart – So sánh Prometheus / CloudWatch / X-Ray**. X-Ray console: Service map của các service greenmart-*."
+          } >> "$GITHUB_STEP_SUMMARY"

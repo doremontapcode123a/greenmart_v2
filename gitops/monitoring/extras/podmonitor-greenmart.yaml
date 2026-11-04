@@ -1,0 +1,23 @@
+# Prometheus scrape /metrics (django-prometheus) của 5 service Django trong namespace greenmart.
+# Gắn nhãn `service` (tên service) để truy vấn: django_http_responses_total_by_status_view_method_total{service="web"}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: greenmart
+  labels:
+    app.kubernetes.io/part-of: greenmart
+spec:
+  namespaceSelector:
+    matchNames: [greenmart]
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [web, user-service, catalog-service, order-service, promotion-service]
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          targetLabel: service

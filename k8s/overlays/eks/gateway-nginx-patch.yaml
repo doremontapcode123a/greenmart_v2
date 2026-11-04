@@ -23,6 +23,8 @@ data:
 
             location = /gateway-health { access_log off; default_type text/plain; return 200 "ok\n"; }
 
+            location = /metrics { return 404; }
+            
             location /static/ { alias /staticfiles/; }
             location /media/  { proxy_pass http://catalog_service; include /etc/nginx/proxy_params; }
 

@@ -9,7 +9,8 @@ resources:
   - ../../base
   - storageclass-ebs.yaml
   - ingress-alb.yaml
-
+  - networkpolicy-monitoring.yaml
+  
 # Image ECR (ĐỔI account id/region/tag). Khớp theo tên image sau khi base đã áp dụng `images:`.
 images:
   - { name:  docker.io/noobcoder1219/user-service,      newName: 410098332444.dkr.ecr.ap-southeast-1.amazonaws.com/greenmart/user-service,      newTag: 1.0.0 }
@@ -52,7 +53,10 @@ patches:
         PUBLIC_HOST: k8s-greenmar-greenmar-8cc3475723-52143455.ap-southeast-1.elb.amazonaws.com            # ĐỔI sau khi có DNS của LoadBalancer (dùng cho link trong email đặt lại mật khẩu)
         CSRF_TRUSTED_ORIGINS: http://k8s-greenmar-greenmar-8cc3475723-52143455.ap-southeast-1.elb.amazonaws.com   # ĐỔI cùng lúc: http://<DNS của LoadBalancer>
         WEB_ALLOWED_HOSTS: "*"            # chưa có domain cố định; siết lại khi có domain
-
+        ENABLE_PROMETHEUS: "1"
+        PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+        ENABLE_XRAY: "1"
+        XRAY_DAEMON_ADDRESS: xray-daemon.monitoring:2000
   # --- Ảnh sản phẩm trên EBS (ReadWriteOnce): catalog-service chạy 1 replica, cập nhật kiểu Recreate ---
   - target: { kind: PersistentVolumeClaim, name: greenmart-media }
     patch: |-
