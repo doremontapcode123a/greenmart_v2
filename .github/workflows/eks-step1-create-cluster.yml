@@ -52,6 +52,11 @@ jobs:
              echo "::error::Không thể sử dụng manifest_path và quick_nodegroup cùng lúc."
              exit 1
           fi
+      - name: Cài eksctl
+        run: |
+          curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin/eksctl
+          eksctl version
       
       - name: Tạo cluster từ cluster-config.yaml (bỏ qua nếu đã có)
         run: |
