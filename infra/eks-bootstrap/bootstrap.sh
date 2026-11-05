@@ -215,6 +215,10 @@ sample_manifest() {
   if [ "$SAMPLE_SCHEME" = "internal" ]; then
     sed -i 's#alb.ingress.kubernetes.io/scheme: internet-facing#alb.ingress.kubernetes.io/scheme: internal#' "$WORKDIR/2048_full.yaml"
   fi
+  
+  if [ -n "${ALB_GROUP_NAME:-}" ]; then
+    sed -i "s#^\( *\)alb.ingress.kubernetes.io/scheme: \(.*\)#\1alb.ingress.kubernetes.io/scheme: \2\n\1alb.ingress.kubernetes.io/group.name: ${ALB_GROUP_NAME}\n\1alb.ingress.kubernetes.io/group.order: \"100\"#" "$WORKDIR/2048_full.yaml"
+  fi
 }
 
 step_sample() {

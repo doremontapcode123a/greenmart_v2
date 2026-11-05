@@ -10,6 +10,8 @@ metadata:
     app.kubernetes.io/part-of: greenmart
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/group.name: greenmart
+    alb.ingress.kubernetes.io/group.order: "1"
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
     alb.ingress.kubernetes.io/healthcheck-path: /gateway-health

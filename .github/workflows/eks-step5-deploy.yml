@@ -78,7 +78,10 @@ jobs:
           echo "ALB: $ADDR"
           echo "address=$ADDR" >> "$GITHUB_OUTPUT"
           echo "ALB: http://$ADDR" >> "$GITHUB_STEP_SUMMARY"
-
+      - name: Xóa sample 2048 (giữ lại ALB)
+        run: |
+          kubectl delete namespace game-2048 --ignore-not-found --wait=true
+          kubectl -n "$NS" get ingress greenmart-alb
       # thay address của ALB vào PUBLIC_HOST và CSRF_TRUSTED_ORIGINS
       - name: Điền địa chỉ ALB vào PUBLIC_HOST và CSRF_TRUSTED_ORIGINS
         run: |

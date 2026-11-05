@@ -21,6 +21,7 @@ env:
   CLUSTER_NAME: ${{ inputs.cluster_name }}
   AWS_REGION: ${{ inputs.aws_region }}
   NS: greenmart
+  
 
 jobs:
   # ===========================================================================
@@ -48,11 +49,8 @@ jobs:
         env:
           INSTALL_TOOLS: "true"
           DEPLOY_SAMPLE: "true"
+          ALB_GROUP_NAME: greenmart
         run: bash infra/eks-bootstrap/bootstrap.sh
 
       # Sau khi test thành công, xóa sample (và ALB của nó): kubectl delete -f 2048_full.yaml --ignore-not-found
-      - name: Xóa sample 2048
-        env:
-          ACTION: delete-sample
-          INSTALL_TOOLS: "true"
-        run: bash infra/eks-bootstrap/bootstrap.sh
+     
