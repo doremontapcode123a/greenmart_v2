@@ -1,7 +1,7 @@
 # Triển khai GreenMart lên EKS = tập hợp 7 giai đoạn (mỗi "###" trong note là một workflow con).
 # Mỗi workflow con chứa các step ("#") của giai đoạn đó, và cũng chạy riêng được bằng Run workflow:
 #   1 eks-step1-create-cluster.yml   2 eks-step2-bootstrap.yml        3 eks-step3-terraform.yml
-#   4 eks-step4-push-images.yml      5 eks-step5-deploy.yml (Argo CD) 6 eks-step6-media-admin.yml
+#   4 eks-step4-push-images.yml      5 eks-step5-deploy.yml (kubectl) hoặc eks-step5-argocd.yml 6 eks-step6-media-admin.yml
 #   7 eks-step7-migrate-legacy.yml   (chỉ chạy khi bật migrate_legacy)
 #   8 eks-step8-monitoring.yml       (Prometheus + Grafana + X-Ray, chạy khi bật monitoring)
 #
@@ -26,6 +26,7 @@ on:
       migrate_legacy:  { description: "7. Chạy thêm bước migrate dữ liệu SQLite cũ", default: false, type: boolean }
       migrate_dry_run: { description: "7. Chỉ chạy thử (--dry-run), chưa ghi dữ liệu", default: true, type: boolean }
       monitoring:      { description: "8. Cài monitoring: Prometheus, Grafana, X-Ray daemon, dashboard so sánh", default: true, type: boolean }
+      deploy_method:   { description: "5. Cách deploy: kubectl (apply -k overlay) hoặc argocd (GitOps)", default: kubectl, type: choice, options: [kubectl, argocd] }
 
 permissions:
   id-token: write   # assume role bằng OIDC
@@ -71,8 +72,9 @@ jobs:
       aws_region: ${{ inputs.aws_region }}
       image_tag: ${{ inputs.image_tag }}
 
-  deploy:
+  deploy-kubectl:
     needs: push-images
+    if: ${{ inputs.deploy_method == 'kubectl' }}
     uses: ./.github/workflows/eks-step5-deploy.yml
     secrets: inherit
     with:
@@ -80,8 +82,20 @@ jobs:
       aws_region: ${{ inputs.aws_region }}
       image_tag: ${{ inputs.image_tag }}
 
+  deploy-argocd:
+    needs: push-images
+    if: ${{ inputs.deploy_method == 'argocd' }}
+    uses: ./.github/workflows/eks-step5-argocd.yml
+    secrets: inherit
+    with:
+      cluster_name: ${{ inputs.cluster_name }}
+      aws_region: ${{ inputs.aws_region }}
+      image_tag: ${{ inputs.image_tag }}
+
   media-and-admin:
-    needs: deploy
+    needs: [deploy-kubectl, deploy-argocd]
+    # một trong hai cách deploy bị bỏ qua (skipped) là bình thường; chỉ dừng khi có job lỗi/hủy
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && contains(needs.*.result, 'success') }}
     uses: ./.github/workflows/eks-step6-media-admin.yml
     secrets: inherit
     with:

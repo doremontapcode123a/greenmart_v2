@@ -1,8 +1,8 @@
-# ### Deploy lên eks bằng Argo CD (GitOps) ###
+# ### Deploy lên eks bằng Argo CD (GitOps) ###  (cách B của giai đoạn 5; cách A là eks-step5-deploy.yml dùng kubectl apply -k)
 # Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
 # Argo CD đồng bộ k8s/overlays/eks từ Git, thay cho `kubectl apply -k`. Vì vậy các file trong repo PHẢI đã được push lên GitHub.
 # Cần: secrets.AWS_ROLE_TO_ASSUME; (repo private) secrets.ARGOCD_REPO_TOKEN = PAT/token đọc repo.
-name: "EKS 5 - Deploy bằng Argo CD"
+name: "EKS 5b - Deploy bằng Argo CD"
 
 on:
   workflow_call:
@@ -109,6 +109,12 @@ jobs:
           echo "address=$ADDR" >> "$GITHUB_OUTPUT"
           echo "ALB: http://$ADDR" >> "$GITHUB_STEP_SUMMARY"
 
+      # Sample 2048 dùng chung ALB với greenmart-alb (IngressGroup): xóa game, ALB và DNS được giữ lại cho web.
+      - name: Xóa sample 2048 (giữ lại ALB)
+        run: |
+          kubectl delete namespace game-2048 --ignore-not-found --wait=true
+          kubectl -n "$NS" get ingress greenmart-alb
+
       # Điền địa chỉ ALB vào PUBLIC_HOST / CSRF_TRUSTED_ORIGINS bằng cách cập nhật lại Application (không sửa file trong Git)
       - name: Cập nhật Application với địa chỉ ALB
         run: |
@@ -124,8 +130,26 @@ jobs:
           kubectl -n "$NS" rollout restart deploy/user-service deploy/web
           kubectl -n "$NS" rollout status deploy/user-service deploy/web --timeout=300s
 
+      - name: Debug khi lỗi
+        if: failure()
+        run: |
+          kubectl -n argocd get applications || true
+          kubectl -n "$NS" get pods -o wide || true
+          kubectl -n "$NS" describe pod -l app.kubernetes.io/name=web | tail -60 || true
+          kubectl -n "$NS" logs deploy/web --tail=80 || true
+
       - name: Kiểm tra gateway-health
         run: curl -fsS --retry 10 --retry-delay 15 --retry-all-errors "http://${{ steps.alb.outputs.address }}/gateway-health"
+
+      # Sample 2048 chung ALB với greenmart-alb (IngressGroup): xóa game, ALB và DNS được giữ lại cho web.
+      - name: Xóa sample 2048 (giữ lại ALB)
+        env:
+          ACTION: delete-sample
+          INSTALL_TOOLS: "true"
+          ALB_GROUP_NAME: greenmart
+        run: |
+          bash infra/eks-bootstrap/bootstrap.sh
+          kubectl -n "$NS" get ingress greenmart-alb
 
       - name: Hướng dẫn mở giao diện Argo CD
         run: |

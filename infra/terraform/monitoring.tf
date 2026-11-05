@@ -78,10 +78,18 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   service_account_role_arn    = aws_iam_role.irsa["cloudwatch-agent"].arn
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
-
+  configuration_values = jsonencode({
+    manager = {
+      applicationSignals = {
+        autoMonitor = {
+          monitorAllServices = false
+        }
+      }
+    }
+   })
   depends_on = [aws_iam_role_policy_attachment.irsa]
 }
-
+  
 # Luật lấy mẫu X-Ray (số nhỏ = ưu tiên cao). Không ghi trace cho health check của kubelet/ALB và /metrics của Prometheus.
 resource "aws_xray_sampling_rule" "skip_health" {
   count          = var.enable_monitoring ? 1 : 0

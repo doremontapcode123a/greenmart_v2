@@ -1,0 +1,205 @@
+# ### Dọn sạch: xóa toàn bộ tài nguyên GreenMart trên AWS để ngừng tính phí ###
+# CHỈ chạy tay (Run workflow). Thao tác KHÔNG THỂ HOÀN TÁC: mất RDS (không snapshot), ảnh upload (EBS), cluster, ALB.
+# Phải gõ đúng tên cluster vào ô "confirm" mới chạy.
+# Thứ tự (quan trọng, làm sai sẽ để sót ALB/ENI/volume và bị tính phí hoặc kẹt xóa VPC):
+#   1 Dừng Argo CD, xóa Ingress -> controller xóa ALB   2 terraform destroy (RDS, secret, IRSA, addon, X-Ray)
+#   3 xóa PVC/PV và ghi lại EBS volume (reclaimPolicy=Retain nên volume không tự mất)   4 xóa namespace
+#   5 eksctl delete cluster   6 xóa EBS volume còn sót, IAM policy của ALB Controller, (tùy chọn) ECR   7 báo cáo tài nguyên còn sót
+# Không xóa: S3 bucket chứa Terraform state (TF_STATE_BUCKET) và các GitHub secret/variable.
+name: "EKS 9 - Xóa sạch tất cả (teardown)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:      { description: "Gõ đúng tên cluster để xác nhận xóa", required: true, type: string }
+      cluster_name: { description: "Tên cluster EKS", required: false, default: "greenmart", type: string }
+      aws_region:   { description: "AWS region", required: false, default: "ap-southeast-1", type: string }
+      delete_ecr:   { description: "Xóa luôn các repository ECR greenmart/* (mất image đã push)", required: false, default: false, type: boolean }
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-eks-${{ inputs.cluster_name }}
+  cancel-in-progress: false
+
+env:
+  CLUSTER_NAME: ${{ inputs.cluster_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  NS: greenmart
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Kiểm tra xác nhận
+        run: |
+          if [ "${{ inputs.confirm }}" != "${{ inputs.cluster_name }}" ]; then
+            echo "confirm phải bằng đúng tên cluster (${{ inputs.cluster_name }}). Dừng, chưa xóa gì."; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/eks-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ inputs.aws_region }}
+          cluster-name: ${{ inputs.cluster_name }}
+          kubeconfig: "false"
+
+      - name: Cài eksctl
+        run: |
+          curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin/eksctl
+          eksctl version
+
+      - name: Cluster còn tồn tại không
+        id: cluster
+        run: |
+          if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Cluster $CLUSTER_NAME không còn: bỏ qua các bước trong cluster."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 1. Dừng Argo CD (để không tự tạo lại tài nguyên), rồi xóa Ingress để ALB Controller xóa ALB và security group của nó
+      - name: Dừng Argo CD và xóa Ingress (xóa ALB)
+        if: ${{ steps.cluster.outputs.exists == 'true' }}
+        run: |
+          kubectl -n argocd scale statefulset/argocd-application-controller --replicas=0 2>/dev/null || true
+          kubectl -n argocd scale deployment/argocd-applicationset-controller --replicas=0 2>/dev/null || true
+          for app in $(kubectl -n argocd get applications -o name 2>/dev/null); do
+            kubectl -n argocd patch "$app" --type merge -p '{"metadata":{"finalizers":null}}' || true
+          done
+          kubectl -n argocd delete applications --all --wait=false 2>/dev/null || true
+          kubectl delete ingress -A --all --wait=true --timeout=300s || true
+          echo "Chờ ALB của cluster biến mất..."
+          for i in $(seq 1 40); do
+            N=$(aws resourcegroupstaggingapi get-resources --region "$AWS_REGION" \
+                  --tag-filters "Key=elbv2.k8s.aws/cluster,Values=$CLUSTER_NAME" \
+                  --resource-type-filters elasticloadbalancing:loadbalancer \
+                  --query 'length(ResourceTagMappingList)' --output text)
+            [ "${N:-0}" = "0" ] && { echo "Không còn ALB."; break; }
+            echo "Còn $N ALB ($i/40)"; sleep 15
+          done
+
+      # 2. Terraform: RDS, secret, IRSA, addon CloudWatch, luật X-Ray. Cần cluster còn sống (provider kubernetes).
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.10"
+          terraform_wrapper: false
+
+      - name: terraform destroy
+        working-directory: infra/terraform
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          : "${TF_STATE_BUCKET:?Cần đặt repository variable TF_STATE_BUCKET}"
+          TF_STATE_BUCKET="$(echo "$TF_STATE_BUCKET" | tr -d '[:space:]')"
+          cat > backend.tf <<EOT
+          terraform {
+            backend "s3" {
+              bucket       = "${TF_STATE_BUCKET}"
+              key          = "greenmart/${CLUSTER_NAME}/terraform.tfstate"
+              region       = "${AWS_REGION}"
+              encrypt      = true
+              use_lockfile = true
+            }
+          }
+          EOT
+          cat > terraform.tfvars <<EOT
+          region                   = "${AWS_REGION}"
+          cluster_name             = "${CLUSTER_NAME}"
+          db_instance_class        = "db.t4g.micro"
+          db_backup_retention_days = 1
+          db_multi_az              = false
+          db_deletion_protection   = false
+          db_skip_final_snapshot   = true
+          install_ebs_csi_addon    = true
+          EOT
+          terraform init -input=false
+          # Cluster đã mất: provider kubernetes không kết nối được -> bỏ các resource kubernetes khỏi state rồi destroy phần AWS
+          if [ "${{ steps.cluster.outputs.exists }}" != "true" ]; then
+            terraform state list | grep '^kubernetes_' | xargs -r -n1 terraform state rm || true
+          fi
+          terraform destroy -input=false -auto-approve
+
+      # 3. Ghi lại EBS volume của PV (Retain: xóa PVC/PV không xóa volume), rồi xóa PVC/PV
+      - name: Xóa PVC/PV và ghi lại EBS volume
+        if: ${{ steps.cluster.outputs.exists == 'true' }}
+        run: |
+          kubectl get pv -o jsonpath='{range .items[*]}{.spec.csi.volumeHandle}{"\n"}{end}' 2>/dev/null | grep '^vol-' > /tmp/volumes.txt || true
+          echo "Volume cần xóa:"; cat /tmp/volumes.txt || true
+          for ns in greenmart monitoring; do
+            kubectl -n "$ns" delete deployment,statefulset,daemonset,job --all --wait=false 2>/dev/null || true
+            kubectl -n "$ns" delete pvc --all --wait=false 2>/dev/null || true
+          done
+          sleep 30
+          kubectl delete pv --all --wait=false 2>/dev/null || true
+          for pv in $(kubectl get pv -o name 2>/dev/null); do
+            kubectl patch "$pv" --type merge -p '{"metadata":{"finalizers":null}}' || true
+          done
+
+      # 4. Namespace (Argo CD, monitoring, app, sample)
+      - name: Xóa namespace
+        if: ${{ steps.cluster.outputs.exists == 'true' }}
+        run: kubectl delete namespace monitoring greenmart argocd game-2048 --ignore-not-found --wait=false || true
+
+      # 5. Cluster + nodegroup + VPC do eksctl tạo. --disable-nodegroup-eviction tránh kẹt vì PodDisruptionBudget
+      - name: eksctl delete cluster
+        if: ${{ steps.cluster.outputs.exists == 'true' }}
+        run: eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --disable-nodegroup-eviction --wait
+
+      # 6. Dọn phần còn sót
+      - name: Xóa EBS volume còn sót
+        run: |
+          [ -s /tmp/volumes.txt ] || { echo "Không có volume ghi lại."; exit 0; }
+          for v in $(cat /tmp/volumes.txt); do
+            aws ec2 wait volume-available --volume-ids "$v" --region "$AWS_REGION" 2>/dev/null || true
+            aws ec2 delete-volume --volume-id "$v" --region "$AWS_REGION" && echo "Đã xóa $v" || echo "Không xóa được $v (có thể đã xóa)"
+          done
+          # volume gắn tag của cluster mà chưa nằm trong danh sách
+          for v in $(aws ec2 describe-volumes --region "$AWS_REGION" \
+                       --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" "Name=status,Values=available" \
+                       --query 'Volumes[].VolumeId' --output text); do
+            aws ec2 delete-volume --volume-id "$v" --region "$AWS_REGION" && echo "Đã xóa $v"
+          done
+
+      - name: Xóa IAM policy của ALB Controller
+        run: |
+          ARN="arn:aws:iam::${ACCOUNT_ID}:policy/AWSLoadBalancerControllerIAMPolicy"
+          aws iam get-policy --policy-arn "$ARN" >/dev/null 2>&1 || { echo "Không có policy."; exit 0; }
+          for v in $(aws iam list-policy-versions --policy-arn "$ARN" --query 'Versions[?IsDefaultVersion==`false`].VersionId' --output text); do
+            aws iam delete-policy-version --policy-arn "$ARN" --version-id "$v" || true
+          done
+          aws iam delete-policy --policy-arn "$ARN" || echo "Policy còn được gắn ở role khác, bỏ qua."
+
+      - name: Xóa repository ECR greenmart/*
+        if: ${{ inputs.delete_ecr }}
+        run: |
+          for r in $(aws ecr describe-repositories --region "$AWS_REGION" \
+                       --query 'repositories[?starts_with(repositoryName, `greenmart/`)].repositoryName' --output text); do
+            aws ecr delete-repository --repository-name "$r" --region "$AWS_REGION" --force && echo "Đã xóa ECR $r"
+          done
+
+      # 7. Báo cáo: những gì còn có thể bị tính phí
+      - name: Báo cáo tài nguyên còn sót
+        if: always()
+        run: |
+          {
+            echo "### Kiểm tra sau khi xóa"
+            echo "- Cluster: $(aws eks list-clusters --region "$AWS_REGION" --query "clusters[?@=='$CLUSTER_NAME']" --output text | wc -w) (0 = đã xóa)"
+            echo "- RDS greenmart-mysql: $(aws rds describe-db-instances --region "$AWS_REGION" --query "DBInstances[?DBInstanceIdentifier=='greenmart-mysql'] | length(@)" --output text) (0 = đã xóa)"
+            echo "- Load balancer: $(aws elbv2 describe-load-balancers --region "$AWS_REGION" --query 'length(LoadBalancers)' --output text)"
+            echo "- EBS volume available: $(aws ec2 describe-volumes --region "$AWS_REGION" --filters Name=status,Values=available --query 'length(Volumes)' --output text)"
+            echo "- NAT gateway còn chạy: $(aws ec2 describe-nat-gateways --region "$AWS_REGION" --filter Name=state,Values=available --query 'length(NatGateways)' --output text)"
+            echo "- Elastic IP chưa gắn: $(aws ec2 describe-addresses --region "$AWS_REGION" --query 'length(Addresses[?AssociationId==null])' --output text)"
+            echo ""
+            echo "Không bị xóa: S3 bucket Terraform state, GitHub secrets/variables, và tài nguyên không thuộc GreenMart trong tài khoản."
+          } | tee -a "$GITHUB_STEP_SUMMARY"

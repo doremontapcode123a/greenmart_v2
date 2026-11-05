@@ -1,6 +1,6 @@
 # ### Giám sát: Prometheus + Grafana + X-Ray daemon (cài bằng Argo CD) và so sánh với CloudWatch/X-Ray ###
 # Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow.
-# Cần: Argo CD đã cài (bước 5), Terraform bước 3 đã tạo role IRSA và addon CloudWatch (enable_monitoring=true).
+# Argo CD: tự cài nếu chưa có (deploy bằng kubectl ở bước 5 thì chưa có Argo CD). Cần Terraform bước 3 đã tạo role IRSA và addon CloudWatch (enable_monitoring=true).
 name: "EKS 8 - Monitoring (Prometheus, Grafana, X-Ray, CloudWatch)"
 
 on:
@@ -18,6 +18,7 @@ permissions:
   contents: read
 
 env:
+  ARGOCD_VERSION: v3.5.7
   CLUSTER_NAME: ${{ inputs.cluster_name }}
   AWS_REGION: ${{ inputs.aws_region }}
   REPO_URL: https://github.com/${{ github.repository }}.git
@@ -41,7 +42,15 @@ jobs:
 
       - name: Kiểm tra Argo CD và role IRSA
         run: |
-          kubectl -n argocd get deployment argocd-server >/dev/null || { echo "Chưa cài Argo CD (chạy bước 5 trước)"; exit 1; }
+          if ! kubectl -n argocd get deployment argocd-server >/dev/null 2>&1; then
+            echo "Chưa có Argo CD: cài ${ARGOCD_VERSION}"
+            kubectl get namespace argocd >/dev/null 2>&1 || kubectl create namespace argocd
+            kubectl apply -n argocd --server-side --force-conflicts \
+              -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+            kubectl -n argocd scale deployment/argocd-dex-server deployment/argocd-notifications-controller --replicas=0 || true
+            kubectl -n argocd rollout status deployment/argocd-server deployment/argocd-repo-server deployment/argocd-applicationset-controller --timeout=300s
+            kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
+          fi
           GRAFANA_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/greenmart-${CLUSTER_NAME}-grafana"
           XRAY_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/greenmart-${CLUSTER_NAME}-xray-daemon"
           aws iam get-role --role-name "greenmart-${CLUSTER_NAME}-grafana" >/dev/null || { echo "Thiếu role Grafana: chạy Terraform với enable_monitoring=true"; exit 1; }
