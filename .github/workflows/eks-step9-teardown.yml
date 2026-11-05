@@ -125,9 +125,7 @@ jobs:
           EOT
           terraform init -input=false
           # Cluster đã mất: provider kubernetes không kết nối được -> bỏ các resource kubernetes khỏi state rồi destroy phần AWS
-          if [ "${{ steps.cluster.outputs.exists }}" != "true" ]; then
-            terraform state list | grep '^kubernetes_' | xargs -r -n1 terraform state rm || true
-          fi
+          terraform state list | grep '^kubernetes_' | xargs -r -n1 terraform state rm || true
           terraform destroy -input=false -auto-approve
 
       # 3. Ghi lại EBS volume của PV (Retain: xóa PVC/PV không xóa volume), rồi xóa PVC/PV
