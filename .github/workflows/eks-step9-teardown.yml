@@ -148,7 +148,15 @@ jobs:
       - name: Xóa namespace
         if: ${{ steps.cluster.outputs.exists == 'true' }}
         run: kubectl delete namespace monitoring greenmart argocd game-2048 --ignore-not-found --wait=false || true
-
+      
+      - name: Ép xóa pod còn sót trước khi xóa cluster
+        if: ${{ steps.cluster.outputs.exists == 'true' }}
+        run: |
+          kubectl delete pdb --all -A --ignore-not-found || true
+          for ns in monitoring greenmart argocd game-2048; do
+            kubectl -n "$ns" delete pods --all --force --grace-period=0 --ignore-not-found 2>/dev/null || true
+          done
+        
       # 5. Cluster + nodegroup + VPC do eksctl tạo. --disable-nodegroup-eviction tránh kẹt vì PodDisruptionBudget
       - name: eksctl delete cluster
         if: ${{ steps.cluster.outputs.exists == 'true' }}

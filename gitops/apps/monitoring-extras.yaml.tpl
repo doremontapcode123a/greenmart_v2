@@ -9,6 +9,11 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
+  ignoreDifferences:
+    - group: monitoring.coreos.com
+      kind: PodMonitor
+      jqPathExpressions:
+        - .spec.podMetricsEndpoints[]?.relabelings[]?.action
   source:
     repoURL: ${REPO_URL}
     targetRevision: ${REPO_REVISION}
