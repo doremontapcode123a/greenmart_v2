@@ -25,7 +25,7 @@ env:
   NS: greenmart
   TAG: ${{ inputs.image_tag }}
 
-jobs:# ### Deploy lên eks bằng các file trong overlay ###  (cách A của giai đoạn 5: kubectl apply -k; cách B là eks-step5-argocd.yml)
+jobs: ### Deploy lên eks bằng các file trong overlay ###  (cách A của giai đoạn 5: kubectl apply -k; cách B là eks-step5-argocd.yml)
 # Workflow con: gọi từ deploy-eks.yml (workflow_call), hoặc chạy riêng bằng Run workflow để làm lại đúng giai đoạn này.
 # Cần secrets/variables như mô tả ở đầu deploy-eks.yml. Cần đã chạy giai đoạn 2 (ALB Controller + sample 2048 dùng chung ALB).
 name: "EKS 5a - Deploy lên EKS (kubectl apply -k)"
