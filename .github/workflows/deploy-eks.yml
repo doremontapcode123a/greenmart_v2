@@ -85,7 +85,7 @@ jobs:
   deploy-argocd:
     needs: push-images
     if: ${{ inputs.deploy_method == 'argocd' }}
-    uses: ./.github/workflows/eks-step5-argocd.yml
+    uses: ./.github/workflows/eks-step5-by-argocd.yml
     secrets: inherit
     with:
       cluster_name: ${{ inputs.cluster_name }}
